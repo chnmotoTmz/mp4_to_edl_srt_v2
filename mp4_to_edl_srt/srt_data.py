@@ -29,3 +29,13 @@ class SRTData:
             A dictionary containing the list of SRT segments.
         """
         return {"segments": self.segments}
+        
+    def __str__(self) -> str:
+        """Formats the SRT data in SRT subtitle format."""
+        lines = []
+        for i, segment in enumerate(self.segments, start=1):
+            lines.append(f"{i}")
+            lines.append(f"{segment['start_time']} --> {segment['end_time']}")
+            lines.append(segment['text'])
+            lines.append("")
+        return "\n".join(lines)
