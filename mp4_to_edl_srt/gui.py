@@ -54,9 +54,22 @@ class MP4ToEDLSRTApp:
         ttk.Label(self.prompt_frame, text="初期プロンプト:").pack(side=tk.LEFT, padx=(0, 10))
         ttk.Entry(self.prompt_frame, textvariable=self.initial_prompt, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
         
+        # タイムコードオプション
+        timecode_frame = ttk.LabelFrame(main_frame, text="タイムコードオプション")
+        timecode_frame.pack(fill=tk.X, pady=(20, 5))
+        
+        # タイムコードオフセットの有効/無効
+        self.use_timecode_offset = tk.BooleanVar(value=True)
+        ttk.Checkbutton(timecode_frame, text="MP4ファイルの内部タイムコードを使用する", 
+                        variable=self.use_timecode_offset).pack(anchor=tk.W, padx=10, pady=5)
+        
+        # タイムコードの説明
+        ttk.Label(timecode_frame, text="※有効にすると、MP4ファイルの内部タイムコード（録画開始時刻）をEDLに反映します。", 
+                 font=("Arial", 9)).pack(anchor=tk.W, padx=20, pady=(0, 5))
+        
         # 音声前処理オプション
         options_frame = ttk.LabelFrame(main_frame, text="音声前処理オプション")
-        options_frame.pack(fill=tk.X, pady=(20, 5))
+        options_frame.pack(fill=tk.X, pady=(10, 5))
         
         # 音声前処理の有効/無効
         self.enable_preprocessing = tk.BooleanVar(value=True)
@@ -203,6 +216,10 @@ class MP4ToEDLSRTApp:
         os.environ["ENABLE_AUDIO_PREPROCESSING"] = str(self.enable_preprocessing.get())
         self.log(f"音声前処理: {'有効' if self.enable_preprocessing.get() else '無効'}")
         
+        # タイムコードオフセットの設定
+        use_timecode = self.use_timecode_offset.get()
+        self.log(f"内部タイムコードの使用: {'有効' if use_timecode else '無効'}")
+        
         # Whisperパラメータを環境変数に設定
         os.environ["WHISPER_TEMPERATURE"] = str(self.temperature.get())
         os.environ["WHISPER_BEAM_SIZE"] = str(self.beam_size.get())
@@ -214,11 +231,11 @@ class MP4ToEDLSRTApp:
         self.log(f" - 文脈考慮: {'有効' if self.condition_on_previous.get() else '無効'}")
         
         # 別スレッドで処理を実行
-        thread = threading.Thread(target=self.run_conversion, args=(input_folder, output_folder))
+        thread = threading.Thread(target=self.run_conversion, args=(input_folder, output_folder, use_timecode))
         thread.daemon = True
         thread.start()
     
-    def run_conversion(self, input_folder, output_folder):
+    def run_conversion(self, input_folder, output_folder, use_timecode_offset=True):
         try:
             # 標準出力と標準エラー出力をキャプチャするためのリダイレクト
             original_stdout = sys.stdout
@@ -249,7 +266,7 @@ class MP4ToEDLSRTApp:
             
             # 変換処理の実行
             self.log(f"処理を開始します: {input_folder} -> {output_folder}")
-            process_folder(input_folder, output_folder)
+            process_folder(input_folder, output_folder, use_timecode_offset=use_timecode_offset)
             
             # 標準出力と標準エラー出力を元に戻す
             sys.stdout = original_stdout

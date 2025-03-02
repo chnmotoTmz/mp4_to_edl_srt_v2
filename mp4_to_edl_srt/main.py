@@ -11,13 +11,14 @@ from srt_data import SRTData
 from segment import Segment
 
 
-def process_folder(input_folder: str, output_folder: str) -> None:
+def process_folder(input_folder: str, output_folder: str, use_timecode_offset: bool = True) -> None:
     """
     Processes a folder of MP4 files to generate combined EDL and SRT files.
     
     Args:
         input_folder: Path to the folder containing MP4 files.
         output_folder: Path to save the output EDL and SRT files.
+        use_timecode_offset: Whether to use the MP4 file's internal timecode as offset.
     """
     # 入力・出力フォルダのパスを正規化
     input_folder = os.path.normpath(input_folder)
@@ -25,6 +26,7 @@ def process_folder(input_folder: str, output_folder: str) -> None:
     
     print(f"入力フォルダ: {input_folder}")
     print(f"出力フォルダ: {output_folder}")
+    print(f"内部タイムコードの使用: {'有効' if use_timecode_offset else '無効'}")
     
     # 環境変数から初期プロンプトを取得
     initial_prompt = os.environ.get("WHISPER_INITIAL_PROMPT", "日本語での自然な会話。文脈に応じて適切な表現を使用してください。")
@@ -78,7 +80,10 @@ def process_folder(input_folder: str, output_folder: str) -> None:
             mp4_file.segment_audio(threshold=0.5)
             
             # EDLデータを生成して結合
-            file_edl_data, next_record_start = mp4_file.generate_edl_data(next_record_start)
+            file_edl_data, next_record_start = mp4_file.generate_edl_data(
+                next_record_start, 
+                use_timecode_offset=use_timecode_offset
+            )
             for event in file_edl_data.events:
                 edl_data.add_event(event)
             
@@ -120,9 +125,13 @@ def main():
     parser = argparse.ArgumentParser(description="MP4 to EDL/SRT Converter")
     parser.add_argument("--input", required=True, help="Input folder containing MP4 files")
     parser.add_argument("--output", required=True, help="Output folder for EDL and SRT files")
+    parser.add_argument("--use-timecode", action="store_true", default=True, 
+                        help="Use MP4 file's internal timecode as offset (default: True)")
+    parser.add_argument("--no-timecode", action="store_false", dest="use_timecode",
+                        help="Ignore MP4 file's internal timecode")
     
     args = parser.parse_args()
-    process_folder(args.input, args.output)
+    process_folder(args.input, args.output, use_timecode_offset=args.use_timecode)
 
 if __name__ == "__main__":
     main()

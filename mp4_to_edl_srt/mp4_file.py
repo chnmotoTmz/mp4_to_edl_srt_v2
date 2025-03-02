@@ -3,10 +3,12 @@ import subprocess
 import whisper
 import pydub
 import re
-from typing import List, Dict, Tuple
+import json
+from typing import List, Dict, Tuple, Optional
 import warnings
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
+from datetime import datetime, timedelta
 
 from segment import Segment
 from edl_data import EDLData
@@ -24,6 +26,97 @@ class MP4File:
         self.segments: List[Segment] = []
         self.edl_data: EDLData = EDLData(title="My Video Project", fcm="NON-DROP FRAME")
         self.srt_data: SRTData = SRTData()
+        self.creation_time: Optional[str] = None
+        self.timecode_offset: Optional[str] = None
+        
+        # ファイルのメタデータを抽出
+        self.extract_metadata()
+
+    def extract_metadata(self) -> None:
+        """MP4ファイルからメタデータ（作成時間やタイムコード）を抽出します。"""
+        try:
+            print(f"ファイルのメタデータを抽出中: {self.filepath}")
+            
+            # FFprobeを使用してメタデータを抽出
+            command = [
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+                self.filepath
+            ]
+            
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            metadata = json.loads(result.stdout)
+            
+            # creation_timeを探す
+            if "format" in metadata and "tags" in metadata["format"]:
+                tags = metadata["format"]["tags"]
+                if "creation_time" in tags:
+                    self.creation_time = tags["creation_time"]
+                    print(f"ファイル作成時間: {self.creation_time}")
+                    
+                    # creation_timeからタイムコードオフセットを計算
+                    try:
+                        # ISO 8601形式の日時文字列をパース (例: 2023-01-01T12:00:00.000Z)
+                        dt = datetime.fromisoformat(self.creation_time.replace('Z', '+00:00'))
+                        # 時間部分だけを取得してタイムコードに変換
+                        hours = dt.hour
+                        minutes = dt.minute
+                        seconds = dt.second
+                        frames = int(dt.microsecond / 1000000 * 30)  # 30fpsとして計算
+                        
+                        self.timecode_offset = f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frames:02d}"
+                        print(f"計算されたタイムコードオフセット: {self.timecode_offset}")
+                    except Exception as e:
+                        print(f"タイムコードオフセットの計算中にエラーが発生しました: {e}")
+            
+            # タイムコードトラックを探す
+            for stream in metadata.get("streams", []):
+                if stream.get("codec_type") == "video" and "tags" in stream:
+                    tags = stream["tags"]
+                    if "timecode" in tags:
+                        # タイムコードトラックが存在する場合はそれを優先
+                        self.timecode_offset = tags["timecode"]
+                        print(f"ビデオストリームからタイムコードを検出: {self.timecode_offset}")
+                        break
+            
+            if not self.timecode_offset:
+                print(f"警告: タイムコードが検出されませんでした。デフォルトの00:00:00:00を使用します。")
+                self.timecode_offset = "00:00:00:00"
+                
+        except subprocess.CalledProcessError as e:
+            print(f"FFprobeエラー: {e.stderr}")
+            print(f"警告: メタデータの抽出に失敗しました。デフォルトのタイムコードを使用します。")
+            self.timecode_offset = "00:00:00:00"
+        except Exception as e:
+            print(f"メタデータ抽出中にエラーが発生しました: {str(e)}")
+            print(f"警告: デフォルトのタイムコードを使用します。")
+            self.timecode_offset = "00:00:00:00"
+
+    def apply_timecode_offset(self, timecode: str) -> str:
+        """
+        タイムコードにオフセットを適用します。
+        
+        Args:
+            timecode: 元のタイムコード (HH:MM:SS:FF形式)
+            
+        Returns:
+            オフセットが適用されたタイムコード
+        """
+        if not self.timecode_offset or self.timecode_offset == "00:00:00:00":
+            return timecode
+            
+        # タイムコードを秒に変換
+        tc_seconds = self._timecode_to_seconds(timecode)
+        offset_seconds = self._timecode_to_seconds(self.timecode_offset)
+        
+        # オフセットを適用
+        result_seconds = tc_seconds + offset_seconds
+        
+        # 秒をタイムコードに戻す
+        return self._seconds_to_timecode(result_seconds)
 
     def extract_audio(self) -> None:
         """Extracts audio from the MP4 file using FFmpeg."""
@@ -55,7 +148,7 @@ class MP4File:
                 
             print(f"Whisperモデルをロード中...")
             # CPUモードで実行するため、device="cpu"を明示的に指定
-            model = whisper.load_model("base", device="cpu")
+            model = whisper.load_model("small", device="cuda")
             
             # 初期プロンプトが指定されていない場合はデフォルト値を使用
             if initial_prompt is None:
@@ -118,19 +211,19 @@ class MP4File:
             # pydubを使用して音声を読み込み
             audio = AudioSegment.from_file(audio_path)
             
-            # 音量の正規化（必要に応じて調整）
+            # 音量の正規化（headroomを0.5に調整してより大きな音量に）
             print(f"音量を正規化中...")
-            normalized_audio = audio.normalize(headroom=1.0)
+            normalized_audio = audio.normalize(headroom=0.5)
             
             # ノイズ除去（FFmpegを使用）
             print(f"ノイズ除去フィルターを適用中...")
             normalized_audio.export("temp_normalized.wav", format="wav")
             
-            # FFmpegのノイズ除去フィルターを適用
+            # FFmpegのノイズ除去フィルターを適用（周波数帯域を拡大し、ノイズ除去強度を調整）
             command = [
                 "ffmpeg",
                 "-i", "temp_normalized.wav",
-                "-af", "highpass=f=200,lowpass=f=3000,afftdn=nf=-25",  # ハイパス、ローパス、ノイズ除去フィルター
+                "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-20",  # 調整されたフィルター
                 "-y",  # 既存ファイルを上書き
                 processed_path
             ]
@@ -205,12 +298,13 @@ class MP4File:
         self.segments.append(Segment(start_timecode, end_timecode, transcription))
         print(f"セグメント追加: {start_timecode} - {end_timecode}")
 
-    def generate_edl_data(self, record_start: str) -> Tuple[EDLData, str]:
+    def generate_edl_data(self, record_start: str, use_timecode_offset: bool = True) -> Tuple[EDLData, str]:
         """Generates EDL data with sequential record timecodes."""
         reel_name = f"TAPE{self.file_index:02d}"
         current_record = self._timecode_to_seconds(record_start)
 
         print(f"EDLデータを生成中 (リール名: {reel_name}, 開始レコード: {record_start})...")
+        print(f"タイムコードオフセットの使用: {'有効' if use_timecode_offset else '無効'}")
         
         # EDLイベントのリストをクリア
         self.edl_data = EDLData(title="My Video Project", fcm="NON-DROP FRAME")
@@ -219,6 +313,15 @@ class MP4File:
         self.edl_events_with_timecode = []
         
         for segment in self.segments:
+            # タイムコードオフセットを適用（オプション）
+            if use_timecode_offset and self.timecode_offset:
+                source_in = self.apply_timecode_offset(segment.start_timecode)
+                source_out = self.apply_timecode_offset(segment.end_timecode)
+                print(f"タイムコードオフセット適用: {segment.start_timecode} → {source_in}")
+            else:
+                source_in = segment.start_timecode
+                source_out = segment.end_timecode
+            
             duration = self._timecode_to_seconds(segment.end_timecode) - self._timecode_to_seconds(segment.start_timecode)
             record_in = self._seconds_to_timecode(current_record)
             record_out = self._seconds_to_timecode(current_record + duration)
@@ -228,8 +331,8 @@ class MP4File:
                 "reel_name": reel_name,
                 "track_type": "AA/V",  # オーディオとビデオの両方
                 "transition": "C",
-                "source_in": segment.start_timecode,
-                "source_out": segment.end_timecode,
+                "source_in": source_in,
+                "source_out": source_out,
                 "record_in": record_in,
                 "record_out": record_out,
                 "clip_name": os.path.basename(self.filepath),
