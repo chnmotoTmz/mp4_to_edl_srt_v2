@@ -13,11 +13,12 @@ class MP4ToEDLSRTApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MP4 to EDL/SRT Converter")
-        self.root.geometry("600x400")
+        self.root.geometry("800x600")
         self.root.resizable(True, True)
         
         self.input_folder = tk.StringVar(value=os.path.join(os.getcwd(), "input_mp4_files"))
         self.output_folder = tk.StringVar(value=os.path.join(os.getcwd(), "output"))
+        self.initial_prompt = tk.StringVar(value="日本語での自然な会話。文脈に応じて適切な表現を使用してください。")
         
         self.create_widgets()
         
@@ -45,6 +46,53 @@ class MP4ToEDLSRTApp:
         ttk.Label(output_frame, text="出力フォルダ:").pack(side=tk.LEFT, padx=(0, 10))
         ttk.Entry(output_frame, textvariable=self.output_folder, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(output_frame, text="参照...", command=self.browse_output_folder).pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 初期プロンプト設定
+        self.prompt_frame = ttk.Frame(main_frame)
+        self.prompt_frame.pack(fill=tk.X, pady=(20, 5))
+        
+        ttk.Label(self.prompt_frame, text="初期プロンプト:").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Entry(self.prompt_frame, textvariable=self.initial_prompt, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # 音声前処理オプション
+        options_frame = ttk.LabelFrame(main_frame, text="音声前処理オプション")
+        options_frame.pack(fill=tk.X, pady=(20, 5))
+        
+        # 音声前処理の有効/無効
+        self.enable_preprocessing = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="音声前処理を有効にする（ノイズ除去と音量正規化）", 
+                        variable=self.enable_preprocessing).pack(anchor=tk.W, padx=10, pady=5)
+        
+        # Whisperパラメータ設定
+        params_frame = ttk.LabelFrame(main_frame, text="Whisperパラメータ")
+        params_frame.pack(fill=tk.X, pady=(10, 5))
+        
+        # Temperature設定
+        temp_frame = ttk.Frame(params_frame)
+        temp_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(temp_frame, text="Temperature:").pack(side=tk.LEFT, padx=(0, 10))
+        self.temperature = tk.DoubleVar(value=0.2)
+        temp_scale = ttk.Scale(temp_frame, from_=0.0, to=1.0, orient=tk.HORIZONTAL, 
+                              variable=self.temperature, length=200)
+        temp_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(temp_frame, textvariable=self.temperature).pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Beam Size設定
+        beam_frame = ttk.Frame(params_frame)
+        beam_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(beam_frame, text="Beam Size:").pack(side=tk.LEFT, padx=(0, 10))
+        self.beam_size = tk.IntVar(value=5)
+        beam_values = [1, 3, 5, 8, 10]
+        beam_combo = ttk.Combobox(beam_frame, textvariable=self.beam_size, values=beam_values, width=5)
+        beam_combo.pack(side=tk.LEFT)
+        ttk.Label(beam_frame, text="（大きいほど精度が上がりますが、処理時間が長くなります）").pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 文脈考慮設定
+        context_frame = ttk.Frame(params_frame)
+        context_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.condition_on_previous = tk.BooleanVar(value=True)
+        ttk.Checkbutton(context_frame, text="前後の文脈を考慮する (condition_on_previous_text)", 
+                        variable=self.condition_on_previous).pack(anchor=tk.W)
         
         # 進行状況
         self.progress_var = tk.DoubleVar()
@@ -105,6 +153,7 @@ class MP4ToEDLSRTApp:
     def start_conversion(self):
         input_folder = self.input_folder.get()
         output_folder = self.output_folder.get()
+        initial_prompt = self.initial_prompt.get()
         
         # パスの正規化
         input_folder = os.path.normpath(input_folder)
@@ -145,6 +194,24 @@ class MP4ToEDLSRTApp:
         else:
             self.log("警告: MP4ファイルが見つかりません")
         self.log("変換を開始します...")
+        
+        # 環境変数に初期プロンプトを設定
+        os.environ["WHISPER_INITIAL_PROMPT"] = initial_prompt
+        self.log(f"初期プロンプトを設定: {initial_prompt}")
+        
+        # 音声前処理の設定を環境変数に設定
+        os.environ["ENABLE_AUDIO_PREPROCESSING"] = str(self.enable_preprocessing.get())
+        self.log(f"音声前処理: {'有効' if self.enable_preprocessing.get() else '無効'}")
+        
+        # Whisperパラメータを環境変数に設定
+        os.environ["WHISPER_TEMPERATURE"] = str(self.temperature.get())
+        os.environ["WHISPER_BEAM_SIZE"] = str(self.beam_size.get())
+        os.environ["WHISPER_CONDITION_ON_PREVIOUS"] = str(self.condition_on_previous.get())
+        
+        self.log(f"Whisperパラメータ設定:")
+        self.log(f" - Temperature: {self.temperature.get()}")
+        self.log(f" - Beam Size: {self.beam_size.get()}")
+        self.log(f" - 文脈考慮: {'有効' if self.condition_on_previous.get() else '無効'}")
         
         # 別スレッドで処理を実行
         thread = threading.Thread(target=self.run_conversion, args=(input_folder, output_folder))

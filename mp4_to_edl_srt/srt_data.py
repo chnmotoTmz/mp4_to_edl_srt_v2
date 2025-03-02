@@ -1,6 +1,5 @@
-import re
+import os
 from typing import List, Dict
-
 from segment import Segment
 
 
@@ -10,32 +9,42 @@ class SRTData:
     """
     def __init__(self) -> None:
         """Initializes an empty list to store SRT segments."""
-        self.segments: List[Dict[str, str]] = []  # Type hint for clarity
+        self.segments: List[Segment] = []
 
     def add_segment(self, segment: Segment) -> None:
-        """
-        Adds a segment to the SRT data.
+        """Adds a segment to the SRT data."""
+        self.segments.append(segment)
 
-        Args:
-            segment: The Segment object containing the segment data.
-        """
-        self.segments.append(segment.to_srt_dict())
-
-    def to_dict(self) -> Dict[str, List[Dict[str, str]]]:
-        """
-        Converts the SRT data to a dictionary.
-
-        Returns:
-            A dictionary containing the list of SRT segments.
-        """
-        return {"segments": self.segments}
+    def write_to_file(self, output_path: str) -> None:
+        """Writes the SRT data to a file."""
+        # セグメントを開始時間でソート
+        sorted_segments = sorted(self.segments, key=lambda x: self._timecode_to_seconds(x.start_timecode))
         
-    def __str__(self) -> str:
-        """Formats the SRT data in SRT subtitle format."""
-        lines = []
-        for i, segment in enumerate(self.segments, start=1):
-            lines.append(f"{i}")
-            lines.append(f"{segment['start_time']} --> {segment['end_time']}")
-            lines.append(segment['text'])
-            lines.append("")
-        return "\n".join(lines)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            for i, segment in enumerate(sorted_segments, 1):
+                # SRTのタイムコード形式に変換
+                start_srt = self._timecode_to_srt(segment.start_timecode)
+                end_srt = self._timecode_to_srt(segment.end_timecode)
+                
+                # テキストを取得（すでにSegmentクラスで整形済み）
+                text = segment.transcription
+                
+                # SRT形式で書き込み
+                f.write(f"{i}\n")
+                f.write(f"{start_srt} --> {end_srt}\n")
+                f.write(f"{text}\n\n")
+        
+        print(f"SRTファイルを保存しました: {output_path}")
+        print(f"合計 {len(sorted_segments)} セグメントを書き込みました")
+
+    def _timecode_to_srt(self, timecode: str) -> str:
+        """Converts HH:MM:SS:FF to SRT format (HH:MM:SS,mmm)."""
+        hh, mm, ss, ff = timecode.split(':')
+        # 30fpsを想定して、フレーム数をミリ秒に変換（1フレーム = 33.33ミリ秒）
+        ms = int(int(ff) * 1000 / 30)
+        return f"{hh}:{mm}:{ss},{ms:03d}"
+        
+    def _timecode_to_seconds(self, timecode: str) -> float:
+        """Converts HH:MM:SS:FF to seconds (30 fps)."""
+        hh, mm, ss, ff = map(int, timecode.split(":"))
+        return hh * 3600 + mm * 60 + ss + ff / 30.0
