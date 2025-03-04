@@ -22,9 +22,10 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo GUIアプリケーションを起動しています...
-python mp4_to_edl_srt/gui.py
-if %ERRORLEVEL% neq 0 (
+py -3.11 mp4_to_edl_srt/gui.py
+if errorlevel 1 (
     echo エラーが発生しました。詳細はログを確認してください。
+    pause
 )
 
 pause 

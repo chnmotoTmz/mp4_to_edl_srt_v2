@@ -36,7 +36,9 @@ def process_folder(input_folder: str, output_folder: str, use_timecode_offset: b
     temperature = os.environ.get("WHISPER_TEMPERATURE", "0.2")
     beam_size = os.environ.get("WHISPER_BEAM_SIZE", "5")
     condition_on_previous = os.environ.get("WHISPER_CONDITION_ON_PREVIOUS", "True")
-    enable_preprocessing = os.environ.get("ENABLE_AUDIO_PREPROCESSING", "True")
+    # 音声前処理を無効化
+    os.environ["ENABLE_AUDIO_PREPROCESSING"] = "False"
+    enable_preprocessing = "False"
     
     print(f"Whisperパラメータ設定:")
     print(f" - Temperature: {temperature}")

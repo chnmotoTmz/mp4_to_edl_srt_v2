@@ -4,11 +4,22 @@ import whisper
 import pydub
 import re
 import json
-from typing import List, Dict, Tuple, Optional
+import torch  # torchを明示的にインポート
+from typing import List, Dict, Tuple, Optional, Any
 import warnings
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 from datetime import datetime, timedelta
+
+# faster-whisperのサポートを追加（インストールされていない場合はスキップ）
+try:
+    from faster_whisper import WhisperModel
+    FASTER_WHISPER_AVAILABLE = True
+    print("faster-whisperライブラリが利用可能です。高速モードが使用できます。")
+except ImportError:
+    FASTER_WHISPER_AVAILABLE = False
+    print("faster-whisperライブラリが見つかりません。標準モードで実行します。")
+    print("高速モードを使用するには次のコマンドを実行してください: pip install faster-whisper")
 
 from segment import Segment
 from edl_data import EDLData
@@ -145,53 +156,189 @@ class MP4File:
         try:
             if not os.path.exists(self.audio_filepath):
                 raise FileNotFoundError(f"音声ファイルが見つかりません: {self.audio_filepath}")
-                
-            print(f"Whisperモデルをロード中...")
-            # CPUモードで実行するため、device="cpu"を明示的に指定
-            model = whisper.load_model("small", device="cuda")
+            
+            # PyTorchの警告を抑制
+            warnings.filterwarnings("ignore", category=FutureWarning, module="whisper")
+            
+            # GPUメモリの最適化設定
+            os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512,expandable_segments:True'
+            
+            # 音声前処理の有効/無効を環境変数から取得
+            enable_preprocessing = os.environ.get("ENABLE_AUDIO_PREPROCESSING", "True").lower() == "true"
+            
+            # 音声ファイルの前処理（オプション）
+            audio_file_to_use = self.audio_filepath
+            if enable_preprocessing:
+                print("音声前処理を実行します...")
+                audio_file_to_use = self._preprocess_audio(self.audio_filepath)
+            else:
+                print("音声前処理をスキップします - 元の音声ファイルを使用")
             
             # 初期プロンプトが指定されていない場合はデフォルト値を使用
             if initial_prompt is None:
-                initial_prompt = "日本語での自然な会話。文脈に応じて適切な表現を使用してください。"
+                # より控えめな初期プロンプトを使用
+                initial_prompt = ""  # 空のプロンプトに変更
                 
-            print(f"文字起こし中: {self.audio_filepath}")
+            print(f"文字起こし中: {audio_file_to_use}")
             print(f"使用する初期プロンプト: {initial_prompt}")
+
+            # faster-whisperが利用可能で、高速モードが選択されている場合
+            use_faster_whisper = FASTER_WHISPER_AVAILABLE
             
-            # 環境変数からWhisperパラメータを取得
-            temperature = float(os.environ.get("WHISPER_TEMPERATURE", "0.2"))
-            beam_size = int(os.environ.get("WHISPER_BEAM_SIZE", "5"))
-            condition_on_previous = os.environ.get("WHISPER_CONDITION_ON_PREVIOUS", "True").lower() == "true"
+            if use_faster_whisper:
+                print("faster-whisperを使用して文字起こしを実行します（高速モード）")
+                # CTranslate2最適化されたモデルを使用
+                try:
+                    # 高速なwhisperモデルを使用 - 常にCPUで実行
+                    model = WhisperModel(
+                        model_size_or_path="deepdml/faster-whisper-large-v3-turbo-ct2", 
+                        device="cpu",  # 常にCPUを使用 
+                        compute_type="int8"  # int8量子化で効率的に実行
+                    )
+                    
+                    print("モデル情報: large-v3-turbo (CPU, int8量子化)")
+                    
+                    # faster-whisperのTranscribeオプション
+                    segments, info = model.transcribe(
+                        audio_file_to_use,
+                        language="ja",
+                        task="transcribe",
+                        initial_prompt=initial_prompt,
+                        condition_on_previous_text=True,
+                        temperature=0.2,
+                        beam_size=5,
+                        word_timestamps=True,
+                        vad_filter=True,  # 音声区間検出フィルタを有効化
+                        vad_parameters={"min_silence_duration_ms": 500}  # 無音区間のパラメータ
+                    )
+                    
+                    print(f"検出された言語: {info.language} (確度: {info.language_probability:.2f})")
+                    
+                    # セグメントを保存
+                    self.segments = []
+                    for segment in segments:
+                        words = []
+                        if hasattr(segment, 'words') and segment.words:
+                            for word in segment.words:
+                                words.append({
+                                    "word": word.word,
+                                    "start": word.start,
+                                    "end": word.end,
+                                    "probability": word.probability
+                                })
+                        
+                        # faster-whisperのセグメントをアプリケーション形式に変換
+                        # start -> start_timecode, end -> end_timecode, text -> transcription
+                        start_timecode = self._seconds_to_timecode(segment.start)
+                        end_timecode = self._seconds_to_timecode(segment.end)
+                        self.segments.append(Segment(
+                            start_timecode=start_timecode,
+                            end_timecode=end_timecode,
+                            transcription=segment.text
+                        ))
+                    
+                    # 結果を保存
+                    self.transcription_result = {
+                        "text": " ".join([segment.text for segment in segments]),
+                        "segments": [{
+                            "start": segment.start,
+                            "end": segment.end,
+                            "text": segment.text
+                        } for segment in segments],
+                        "language": info.language
+                    }
+                    
+                    # EDLとSRTデータを生成
+                    self.generate_edl_data("00:00:00:00")
+                    self.generate_srt_data()
+                    return
+                    
+                except Exception as e:
+                    print(f"faster-whisperでのエラー: {str(e)}")
+                    print("標準のwhisperにフォールバックします...")
             
-            print(f"Whisperパラメータ:")
-            print(f" - Temperature: {temperature}")
-            print(f" - Beam Size: {beam_size}")
-            print(f" - 文脈考慮: {'有効' if condition_on_previous else '無効'}")
+            # 標準のwhisperを使用する場合は、ここから下の既存のコードを実行
+            # 勾配計算を無効化
+            torch.set_grad_enabled(False)
             
-            # 音声の前処理（環境変数から設定を取得）
-            enable_preprocessing = os.environ.get("ENABLE_AUDIO_PREPROCESSING", "True").lower() == "true"
+            # CUDA初期化前の設定
+            if torch.cuda.is_available():
+                # GPUキャッシュをクリア
+                torch.cuda.empty_cache()
+                # メモリの断片化を防ぐ
+                torch.cuda.memory.set_per_process_memory_fraction(0.8)  # GPUメモリの80%まで使用に制限
+                # CUDAストリームを同期
+                torch.cuda.synchronize()
+                
+                # CUBLASワークスペースを制限
+                os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+                
+                # 利用可能なGPUメモリをチェック
+                total_memory = torch.cuda.get_device_properties(0).total_memory
+                available_memory = total_memory - torch.cuda.memory_allocated(0)
+                print(f"利用可能なGPUメモリ: {available_memory / 1024**3:.2f} GB")
             
-            if enable_preprocessing:
-                print(f"音声の前処理を実行中...")
-                processed_audio_path = self._preprocess_audio(self.audio_filepath)
-                print(f"前処理済み音声ファイル: {processed_audio_path}")
-            else:
-                print(f"音声の前処理はスキップされました")
-                processed_audio_path = self.audio_filepath
+            # モデルロードの関数を定義
+            def load_model_safely(model_name, device):
+                try:
+                    # 古いバージョンのWhisperでは一部のパラメータがサポートされていないため削除
+                    model = whisper.load_model(
+                        model_name,
+                        device=device,
+                        download_root=os.path.join(os.path.expanduser("~"), ".cache", "whisper")
+                    )
+                    return model
+                except Exception as e:
+                    print(f"モデルロード中のエラー: {str(e)}")
+                    return None
             
-            # 詳細なパラメータを設定して日本語文字起こしの精度を向上
-            self.transcription_result = model.transcribe(
-                processed_audio_path,
-                language="ja",                           # 日本語を強制的に指定
-                task="transcribe",                       # 文字起こしタスク
-                verbose=True,                            # 詳細な出力を表示
-                initial_prompt=initial_prompt,           # 初期プロンプトを設定
-                condition_on_previous_text=condition_on_previous,  # 前のテキストに条件付け（文脈を考慮）
-                temperature=temperature,                 # 柔軟性の設定
-                best_of=1,                               # 最良の結果を1つ選択
-                beam_size=beam_size,                     # ビームサイズの設定
-                word_timestamps=True,                    # 単語レベルのタイムスタンプを取得
-                fp16=False                               # CPU使用時はFP16を無効化（FP32を使用）
-            )
+            # モデルサイズの要件（より現実的な見積もり）
+            model_memory_requirements = {
+                "medium": 5 * 1024**3,     # 5GB
+                "small": 2 * 1024**3       # 2GB
+            }
+            
+            # モデル選択
+            model = None
+            
+            if torch.cuda.is_available():
+                # 利用可能なメモリに基づいてモデルを選択
+                for model_name, required_memory in model_memory_requirements.items():
+                    if available_memory >= required_memory * 1.2:  # 20%のバッファを追加
+                        print(f"選択したモデル: {model_name} (必要メモリ: {required_memory / 1024**3:.1f}GB)")
+                        model = load_model_safely(model_name, "cuda")
+                        if model is not None:
+                            print(f"{model_name}モデルのロードに成功しました")
+                            break
+                        else:
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+            
+            # どのモデルもロードできなかった場合、CPUでsmallモデルを使用
+            if model is None:
+                print("警告: GPUモデルのロードに失敗したため、CPUでsmallモデルを使用します")
+                model = load_model_safely("small", "cpu")
+                if model is None:
+                    raise Exception("すべてのモデルのロードに失敗しました")
+                print("smallモデルをCPUにロードしました")
+            
+            # 文字起こしを実行
+            transcribe_options = {
+                "language": "ja",
+                "task": "transcribe",
+                "temperature": 0.2,
+                "beam_size": 5,
+                "initial_prompt": initial_prompt,
+                "condition_on_previous_text": True,
+                "verbose": True,
+                "fp16": False,  # 精度を優先
+                "suppress_tokens": [-1]  # 特殊トークンを抑制
+            }
+            
+            # 文字起こしを実行
+            result = model.transcribe(audio_file_to_use, **transcribe_options)
+            
+            self.transcription_result = result
             
             print(f"文字起こし完了: {len(self.transcription_result.get('segments', []))}セグメント")
         except Exception as e:
@@ -223,7 +370,7 @@ class MP4File:
             command = [
                 "ffmpeg",
                 "-i", "temp_normalized.wav",
-                "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-20",  # 調整されたフィルター
+                "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-20",  # 元のフィルター設定
                 "-y",  # 既存ファイルを上書き
                 processed_path
             ]
@@ -312,17 +459,30 @@ class MP4File:
         # EDLイベントとそのレコードタイムコードを保存するリスト
         self.edl_events_with_timecode = []
         
+        # 内部タイムコードの終了時間を計算（開始時間 + 1時間と仮定）
+        if self.timecode_offset and self.timecode_offset != "00:00:00:00":
+            start_time_seconds = self._timecode_to_seconds(self.timecode_offset)
+            end_time_seconds = start_time_seconds + 3600  # 1時間後
+            print(f"内部タイムコード範囲: {self.timecode_offset} - {self._seconds_to_timecode(end_time_seconds)}")
+        
         for segment in self.segments:
             # タイムコードオフセットを適用（オプション）
             if use_timecode_offset and self.timecode_offset:
                 source_in = self.apply_timecode_offset(segment.start_timecode)
                 source_out = self.apply_timecode_offset(segment.end_timecode)
+                
+                # 内部タイムコードの範囲をチェック
+                source_out_seconds = self._timecode_to_seconds(source_out)
+                if source_out_seconds > end_time_seconds:
+                    print(f"警告: セグメントの終了時間 ({source_out}) が内部タイムコードの範囲を超えています。終了時間を調整します。")
+                    source_out = self._seconds_to_timecode(end_time_seconds)
+                    
                 print(f"タイムコードオフセット適用: {segment.start_timecode} → {source_in}")
             else:
                 source_in = segment.start_timecode
                 source_out = segment.end_timecode
             
-            duration = self._timecode_to_seconds(segment.end_timecode) - self._timecode_to_seconds(segment.start_timecode)
+            duration = self._timecode_to_seconds(source_out) - self._timecode_to_seconds(source_in)
             record_in = self._seconds_to_timecode(current_record)
             record_out = self._seconds_to_timecode(current_record + duration)
             

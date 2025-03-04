@@ -30,3 +30,5 @@ if [ $? -ne 0 ]; then
 fi
 
 read -p "Enterキーを押して終了..." 
+
+py -3.11 -m pip install faster-whisper 
