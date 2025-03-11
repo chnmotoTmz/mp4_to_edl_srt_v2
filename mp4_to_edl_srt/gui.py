@@ -13,7 +13,7 @@ class MP4ToEDLSRTApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MP4 to EDL/SRT Converter")
-        self.root.geometry("800x600")
+        self.root.geometry("800x900")
         self.root.resizable(True, True)
         
         self.input_folder = tk.StringVar(value=os.path.join(os.getcwd(), "input_mp4_files"))
