@@ -28,6 +28,109 @@ from srt_data import SRTData
 # Whisperの警告を非表示にする
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
 
+class ConfigManager:
+    """アプリケーション設定を管理するクラス"""
+    
+    DEFAULT_CONFIG = {
+        "whisper": {
+            "model": "small",
+            "language": "ja",
+            "initial_prompt": "日本語での自然な会話。",
+            "temperature": 0.0,
+            "beam_size": 5,
+            "condition_on_previous": True
+        },
+        "audio": {
+            "sample_rate": 44100,
+            "channels": 2,
+            "format": "wav",
+            "preprocessing": False
+        },
+        "segmentation": {
+            "threshold": 0.5,
+            "min_segment_length": 0.2,
+            "max_segment_length": 30.0,
+            "merge_threshold": 0.3
+        },
+        "edl": {
+            "title": "MP4 to EDL Project",
+            "fcm": "NON-DROP FRAME",
+            "use_timecode_offset": True
+        },
+        "paths": {
+            "last_input_folder": "",
+            "last_output_folder": ""
+        },
+        "gui": {
+            "theme": "default",
+            "font_size": 10,
+            "window_width": 800,
+            "window_height": 900
+        }
+    }
+    
+    def __init__(self, config_path="config.json"):
+        """設定を初期化"""
+        self.config_path = config_path
+        self.config = self.load_config()
+    
+    def load_config(self):
+        """設定ファイルを読み込む"""
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    loaded_config = json.load(f)
+                    
+                # デフォルト設定をベースに、ロードした設定で上書き
+                config = self.DEFAULT_CONFIG.copy()
+                self._update_nested_dict(config, loaded_config)
+                return config
+            except Exception as e:
+                print(f"設定ファイル読み込みエラー: {e}")
+                return self.DEFAULT_CONFIG.copy()
+        else:
+            # 設定ファイルがない場合はデフォルト設定を保存
+            self._save_config(self.DEFAULT_CONFIG)
+            return self.DEFAULT_CONFIG.copy()
+    
+    def _update_nested_dict(self, d, u):
+        """ネストされた辞書を再帰的に更新"""
+        for k, v in u.items():
+            if isinstance(v, dict) and k in d and isinstance(d[k], dict):
+                self._update_nested_dict(d[k], v)
+            else:
+                d[k] = v
+    
+    def save_config(self):
+        """現在の設定をファイルに保存"""
+        self._save_config(self.config)
+    
+    def _save_config(self, config):
+        """設定をJSONファイルに保存"""
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"設定ファイル保存エラー: {e}")
+    
+    def get(self, section, key=None):
+        """設定値を取得"""
+        if key is None:
+            return self.config.get(section, {})
+        return self.config.get(section, {}).get(key)
+    
+    def set(self, section, key, value):
+        """設定値を設定"""
+        if section not in self.config:
+            self.config[section] = {}
+        self.config[section][key] = value
+    
+    def update_section(self, section, values):
+        """セクション全体を更新"""
+        if section not in self.config:
+            self.config[section] = {}
+        self.config[section].update(values)
+
 class MP4File:
     def __init__(self, filepath: str, file_index: int):
         self.filepath: str = os.path.normpath(filepath)
@@ -465,6 +568,9 @@ class MP4File:
             end_time_seconds = start_time_seconds + 3600  # 1時間後
             print(f"内部タイムコード範囲: {self.timecode_offset} - {self._seconds_to_timecode(end_time_seconds)}")
         
+        # 最小長さ（フレーム数）の設定
+        min_duration_frames = 5  # 最低5フレーム以上のセグメントのみ処理
+        
         for segment in self.segments:
             # タイムコードオフセットを適用（オプション）
             if use_timecode_offset and self.timecode_offset:
@@ -481,6 +587,32 @@ class MP4File:
             else:
                 source_in = segment.start_timecode
                 source_out = segment.end_timecode
+            
+            # セグメントの長さを計算
+            source_in_parts = source_in.split(':')
+            source_out_parts = source_out.split(':')
+            
+            # タイムコードをフレームに変換
+            source_in_frames = (
+                int(source_in_parts[0]) * 3600 * 30 +
+                int(source_in_parts[1]) * 60 * 30 +
+                int(source_in_parts[2]) * 30 +
+                int(source_in_parts[3])
+            )
+            source_out_frames = (
+                int(source_out_parts[0]) * 3600 * 30 +
+                int(source_out_parts[1]) * 60 * 30 +
+                int(source_out_parts[2]) * 30 +
+                int(source_out_parts[3])
+            )
+            
+            # セグメントのフレーム数を計算
+            segment_frames = source_out_frames - source_in_frames
+            
+            # 短いセグメントをスキップ
+            if segment_frames < min_duration_frames:
+                print(f"短いセグメントをスキップ: {source_in} → {source_out} (フレーム数: {segment_frames})")
+                continue
             
             duration = self._timecode_to_seconds(source_out) - self._timecode_to_seconds(source_in)
             record_in = self._seconds_to_timecode(current_record)
