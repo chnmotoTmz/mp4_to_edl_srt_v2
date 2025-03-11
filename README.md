@@ -16,6 +16,7 @@ MP4 to EDL/SRT Converter is a tool that converts MP4 video files into EDL (Edit 
 - Preserves original timecodes from MP4 files
 - User-friendly GUI interface
 - Settings configurable directly in the GUI
+- **Bilingual interface (English/Japanese)**
 
 ### Requirements
 - Python 3.8 or later
@@ -47,7 +48,8 @@ MP4 to EDL/SRT Converter is a tool that converts MP4 video files into EDL (Edit 
 2. Select input folder containing MP4 files
 3. Choose output folder for EDL/SRT files
 4. Configure optional settings in the GUI
-5. Click "Start Conversion"
+5. **Select your preferred language (English/Japanese) from the interface**
+6. Click "Start Conversion"
 
 #### Command Line Mode
 ```bash
@@ -74,6 +76,7 @@ This project is currently in beta. Basic features are implemented, but there are
 - Text transcription using Whisper AI
 - EDL/SRT file generation
 - Basic GUI interface with customizable settings
+- **Bilingual interface (English/Japanese)**
 
 ### Known Issues
 
@@ -96,6 +99,7 @@ This project is currently in beta. Basic features are implemented, but there are
 - Audio processing parameter adjustment
 - Memory usage optimization
 - GUI functionality improvements and stabilization
+- **Additional interface languages**
 
 ### Feedback Request
 
@@ -114,6 +118,38 @@ If you encounter offline media errors when importing EDL files into DaVinci Reso
 
 This setting allows Resolve to skip offline clips during rendering rather than stopping the entire process.
 
+## Settings Saving Feature
+
+The application automatically saves the following settings and restores them on the next startup:
+
+- Selected language (Japanese/English)
+- Last used input folder path
+- Last used output folder path
+
+These settings are saved in a `settings.json` file. This file is typically created in the same directory as the application.
+
+### Example of settings.json
+
+```json
+{
+    "language": "en",
+    "last_input_folder": "C:/Users/username/Videos",
+    "last_output_folder": "C:/Users/username/Projects/edl_files"
+}
+```
+
+For Japanese selection:
+
+```json
+{
+    "language": "ja",
+    "last_input_folder": "C:/Users/username/Documents/mp4_files",
+    "last_output_folder": "C:/Users/username/Documents/edl_output"
+}
+```
+
+You don't need to manually edit the settings file. Settings are automatically saved while using the application.
+
 <a id="japanese"></a>
 ## 日本語
 
@@ -128,6 +164,7 @@ MP4 to EDL/SRT Converterは、MP4動画ファイルをEDL（編集決定リス�
 - MP4ファイルの内部タイムコードを保持
 - 使いやすいGUIインターフェース
 - GUI上で直接設定可能
+- **バイリンガルインターフェース（日本語/英語）**
 
 ### 必要条件
 - Python 3.8以降
@@ -159,7 +196,8 @@ MP4 to EDL/SRT Converterは、MP4動画ファイルをEDL（編集決定リス�
 2. MP4ファイルが入った入力フォルダを選択
 3. EDL/SRTファイルの出力先フォルダを選択
 4. GUI上でオプション設定を行う
-5. 「変換開始」をクリック
+5. **インターフェースから希望の言語（日本語/英語）を選択**
+6. 「変換開始」をクリック
 
 #### コマンドラインモード
 ```bash
@@ -186,6 +224,7 @@ python main.py --input /path/to/input/folder --output /path/to/output/folder
 - Whisper AIによる基本的な文字起こし
 - EDL/SRTファイルの生成
 - カスタマイズ可能な設定を備えた基本的なGUIインターフェース
+- **バイリンガルインターフェース（日本語/英語）**
 
 ### 既知の問題点
 
@@ -208,6 +247,7 @@ python main.py --input /path/to/input/folder --output /path/to/output/folder
 - 音声処理パラメータの調整機能
 - メモリ使用量の最適化
 - GUIの機能改善と安定化
+- **インターフェース言語の追加**
 
 ### フィードバックのお願い
 
@@ -230,3 +270,35 @@ EDLファイルをDaVinci Resolveにインポートした際にオフライン�
 - 処理時間は動画の長さやPCのスペックによって変動します
 - 高速モードを使用する場合は、別途faster-whisperのインストールが必要です
 - 大量のファイルを処理する場合は、十分なディスク容量を確保してください
+
+## 設定保存機能について
+
+アプリケーションは以下の設定を自動的に保存し、次回起動時に復元します：
+
+- 選択された言語（日本語/英語）
+- 最後に使用した入力フォルダのパス
+- 最後に使用した出力フォルダのパス
+
+これらの設定は `settings.json` ファイルに保存されます。このファイルは通常、アプリケーションと同じディレクトリに作成されます。
+
+### settings.jsonの例
+
+```json
+{
+    "language": "ja",
+    "last_input_folder": "C:/Users/username/Documents/mp4_files",
+    "last_output_folder": "C:/Users/username/Documents/edl_output"
+}
+```
+
+英語を選択した場合：
+
+```json
+{
+    "language": "en",
+    "last_input_folder": "C:/Users/username/Videos",
+    "last_output_folder": "C:/Users/username/Projects/edl_files"
+}
+```
+
+手動で設定ファイルを編集する必要はありません。アプリケーションの使用中に設定が自動的に保存されます。
