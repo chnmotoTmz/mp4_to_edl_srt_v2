@@ -1,2 +1,65 @@
-__pycache__
-*.pyc
+# プロジェクト固有のディレクトリ
+util/
+utils/
+logs/
+output/
+input_mp4_files/
+
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 仮想環境
+venv/
+env/
+ENV/
+.env
+.venv
+
+# IDE関連
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS関連
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 一時ファイル
+*.log
+*.tmp
+*.temp
+temp/
+tmp/
+
+# 音声・動画ファイル
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+
+# 出力ファイル
+*.edl
+*.srt
