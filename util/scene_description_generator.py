@@ -18,6 +18,34 @@ RETRY_DELAY = 2  # リトライ間の遅延（秒）
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "0c939952353f8ab495951a1420a13b1f5b08001d")  # 環境変数からAPIキーを取得
 DISABLE_WEB_SEARCH = os.environ.get("DISABLE_WEB_SEARCH", "0") == "1"  # ウェブ検索を無効化するかどうか
 
+# 言語設定
+SUPPORTED_LANGUAGES = {
+    'ja': {
+        'name': '日本語',
+        'prefix': '【ナレーション】',
+        'search_suffix': '特徴 説明 歴史 情報',
+        'serper_params': {'gl': 'jp', 'hl': 'ja'}
+    },
+    'en': {
+        'name': 'English',
+        'prefix': '[NARRATION]',
+        'search_suffix': 'features description history information',
+        'serper_params': {'gl': 'us', 'hl': 'en'}
+    },
+    'zh': {
+        'name': '中文',
+        'prefix': '【旁白】',
+        'search_suffix': '特征 说明 历史 信息',
+        'serper_params': {'gl': 'cn', 'hl': 'zh'}
+    },
+    'ko': {
+        'name': '한국어',
+        'prefix': '【내레이션】',
+        'search_suffix': '특징 설명 역사 정보',
+        'serper_params': {'gl': 'kr', 'hl': 'ko'}
+    }
+}
+
 # 一時的なシナリオファイル名（古い関数との互換性用）
 TEMP_SCENARIO_FILE = "temp_scenario.md"
 
@@ -49,10 +77,19 @@ class SRTBlock:
     
     def get_formatted_timestamp(self, seconds: float) -> str:
         """秒数をSRT形式のタイムスタンプに変換します。"""
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = seconds % 60
-        return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")
+        try:
+            if isinstance(seconds, str):
+                # 文字列が渡された場合は、既にフォーマット済みと仮定
+                return seconds
+            
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = seconds % 60
+            ms = int((s - int(s)) * 1000)
+            return f"{h:02d}:{m:02d}:{int(s):02d},{ms:03d}"
+        except Exception as e:
+            print(f"タイムスタンプの変換中にエラーが発生しました: {e}")
+            return "00:00:00,000"
     
     def __str__(self) -> str:
         """SRTブロックの文字列表現を返します。"""
@@ -210,13 +247,14 @@ def format_time(seconds: float) -> str:
     s = int(seconds % 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-def search_web(query: str, num_results: int = 3) -> str:
+def search_web(query: str, num_results: int = 3, language: str = 'ja') -> str:
     """
     Serper APIを使用してWeb検索を行い、結果を返します。
     
     Args:
         query: 検索クエリ
         num_results: 取得する検索結果の数
+        language: 検索言語コード（'ja', 'en', 'zh', 'ko'）
         
     Returns:
         検索結果のテキスト
@@ -229,12 +267,12 @@ def search_web(query: str, num_results: int = 3) -> str:
     print(f"\n=== Serper API リクエスト ===")
     print(f"検索クエリ: {query}")
     print(f"結果数: {num_results}")
+    print(f"言語: {SUPPORTED_LANGUAGES[language]['name']}")
     
     url = "https://google.serper.dev/search"
     payload = json.dumps({
         "q": query,
-        "gl": "jp",
-        "hl": "ja",
+        **SUPPORTED_LANGUAGES[language]['serper_params'],
         "num": num_results
     })
     headers = {
@@ -521,7 +559,7 @@ def generate_ending_prompt(scenario_text: str, search_results: str) -> str:
     
     return prompt
 
-def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_end: float, scenario_text: str = "", search_result: str = "") -> str:
+def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_end: float, scenario_text: str = "", search_result: str = "", language: str = 'ja') -> str:
     """
     Gemini AIを使用してシーン説明を生成します。
     
@@ -531,6 +569,7 @@ def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_e
         scene_end: シーンの終了時間（秒）
         scenario_text: シナリオのテキスト（あれば）
         search_result: Web検索の結果（あれば）
+        language: 生成する言語コード（'ja', 'en', 'zh', 'ko'）
         
     Returns:
         生成されたシーン説明
@@ -539,6 +578,9 @@ def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_e
     
     start_time_formatted = format_time(scene_start)
     end_time_formatted = format_time(scene_end)
+    
+    # 言語設定を取得
+    lang_config = SUPPORTED_LANGUAGES[language]
     
     # 入力情報をログとして表示
     print(f"\n時間帯 {start_time_formatted} - {end_time_formatted} の字幕:")
@@ -554,48 +596,114 @@ def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_e
         print("\n関連する検索結果:")
         print(search_result[:300] + "..." if len(search_result) > 300 else search_result)
     
-    # プロンプトの作成
-    prompt = f"""
-時間帯 {start_time_formatted} から {end_time_formatted} までのシーンの説明を作成してください。
+    # プロンプトの言語別テンプレート
+    prompts = {
+        'ja': """
+時間帯 {start_time} から {end_time} までのシーンナレーションを日本語で作成してください。
 以下の情報に基づいてください:
 
 ### 字幕テキスト
-{text_in_scene}
+{text}
 
-"""
+{scenario_section}
+{search_section}
 
-    # シナリオがある場合はプロンプトに追加
-    if scenario_text:
-        prompt += f"""
-### シナリオ情報
-{scenario_text}
-
-"""
-
-    # ウェブ検索が有効で検索結果がある場合はプロンプトに追加
-    if search_result and not DISABLE_WEB_SEARCH:
-        prompt += f"""
-### 関連する情報
-{search_result}
-
-"""
-
-    # 指示と出力フォーマットについての説明
-    prompt += """
-上記の情報に基づいて、このシーンで何が起きているかを簡潔に説明してください。
-映像には何が写っているかを想像し、それをシーン説明として表現してください。
+上記の情報に基づいて、このシーンで何が起きているかを説明するナレーションを作成してください。
+視聴者に親しみやすく語りかけるような口調で、旅番組のナレーションとして適切な内容にしてください。
 
 注意事項:
-- 説明は50文字以内で簡潔にまとめてください
-- 先頭に【シーン】と付けてください
-- 字幕の内容をそのまま繰り返さないでください
-- 検索情報をそのまま引用しないでください
-- 時間情報を出力に含めないでください
-- 客観的な説明を心がけ、「～と思われる」などの主観的な表現は避けてください
+- 長さは200文字以内で、情報量を重視してください
+- 先頭に【ナレーション】と付けてください
+- シナリオの内容を優先し、そこに記載されている情報を尊重してください
+- 検索情報から得られた事実や数字などの具体的情報も適宜盛り込んでください
+- 字幕の内容を補完するように、映像で見えているであろう情報も加えてください
+- 硬すぎる学術的表現は避け、「皆さんも見てください」「～ですね」など、視聴者に話しかけるような温かみのある表現を使ってください
+""",
+        'en': """
+Please create a scene narration in English for the time period from {start_time} to {end_time}.
+Base it on the following information:
 
-出力例:
-【シーン】バスは雪道をゆっくり進んでいる
+### Subtitle Text
+{text}
+
+{scenario_section}
+{search_section}
+
+Create a narration that explains what's happening in this scene.
+Use a friendly, conversational tone suitable for a travel documentary.
+
+Guidelines:
+- Keep it within 200 characters while prioritizing information
+- Start with [NARRATION]
+- Prioritize scenario content and respect the information provided
+- Include specific facts and figures from search results where appropriate
+- Complement the subtitle content with visual information that might be seen in the footage
+- Avoid overly academic expressions, use viewer-friendly phrases like "let's take a look" or "as you can see"
+""",
+        'zh': """
+请为{start_time}到{end_time}的场景创建中文旁白。
+基于以下信息：
+
+### 字幕文本
+{text}
+
+{scenario_section}
+{search_section}
+
+请创建一个解释这个场景内容的旁白。
+使用适合旅游纪录片的友好口吻。
+
+注意事项：
+- 控制在200字以内，优先考虑信息量
+- 以【旁白】开头
+- 优先考虑剧本内容，尊重提供的信息
+- 适当加入搜索结果中的具体事实和数据
+- 补充字幕内容，描述画面中可能出现的信息
+- 避免过于学术的表达，使用"让我们一起看看"、"您看"等亲切的表达方式
+""",
+        'ko': """
+{start_time}부터 {end_time}까지의 장면 내레이션을 한국어로 작성해 주세요.
+다음 정보를 바탕으로 작성해 주세요:
+
+### 자막 텍스트
+{text}
+
+{scenario_section}
+{search_section}
+
+이 장면에서 일어나는 일을 설명하는 내레이션을 작성해 주세요.
+여행 다큐멘터리에 적합한 친근한 어조로 작성해 주세요.
+
+주의사항:
+- 200자 이내로 정보량을 우선시하여 작성해 주세요
+- 【내레이션】으로 시작해 주세요
+- 시나리오 내용을 우선시하고 제공된 정보를 존중해 주세요
+- 검색 결과에서 얻은 구체적인 사실과 수치를 적절히 포함해 주세요
+- 자막 내용을 보완하여 영상에서 보일 수 있는 정보도 추가해 주세요
+- 너무 학술적인 표현은 피하고 "함께 보시죠", "~네요" 등 시청자에게 말을 거는 듯한 따뜻한 표현을 사용해 주세요
 """
+    }
+
+    # シナリオセクションの準備
+    scenario_section = f"""
+### シナリオ情報
+{scenario_text}
+""" if scenario_text else ""
+
+    # 検索結果セクションの準備
+    search_section = f"""
+### 関連する情報
+{search_result}
+""" if search_result and not DISABLE_WEB_SEARCH else ""
+
+    # プロンプトの作成
+    prompt = prompts[language].format(
+        start_time=start_time_formatted,
+        end_time=end_time_formatted,
+        text=text_in_scene,
+        scenario_section=scenario_section,
+        search_section=search_section
+    )
 
     print(f"\n=== Gemini API リクエスト ===")
     print(f"モデル: {MODEL}")
@@ -603,7 +711,7 @@ def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_e
     display_key = API_KEY[:4] + "..." + API_KEY[-4:] if len(API_KEY) > 8 else "設定されていません"
     print(f"API Key: {display_key}")
     print(f"プロンプト長: {len(prompt)} 文字")
-    print(f"プロンプト内容の概要: 時間帯 {start_time_formatted} - {end_time_formatted} のシーン説明を生成")
+    print(f"プロンプト内容の概要: 時間帯 {start_time_formatted} - {end_time_formatted} のシーンナレーションを生成")
 
     # Gemini API呼び出し関数のリトライ機能
     def call_api_with_retry(prompt: str) -> str:
@@ -633,31 +741,238 @@ def generate_caption_with_gemini(text_in_scene: str, scene_start: float, scene_e
                     time.sleep(RETRY_DELAY)
                 else:
                     print(f"リトライ回数を超えました: {e}")
-                    return "【シーン】（情報なし）"
+                    return "【ナレーション】（情報なし）"
             except Exception as e:
                 print(f"API呼び出し中に予期しないエラーが発生しました: {e}")
                 import traceback
                 print(traceback.format_exc())
-                return "【シーン】（情報なし）"
+                return "【ナレーション】（情報なし）"
     
     # APIを呼び出してシーン説明を生成
     caption = call_api_with_retry(prompt)
     
-    # 先頭に【シーン】が付いていない場合は追加
-    if not caption.strip().startswith("【シーン】"):
-        print("警告: レスポンスに【シーン】が含まれていないため追加します")
-        caption = "【シーン】" + caption.strip()
+    # 先頭に【ナレーション】が付いていない場合は追加
+    if not caption.strip().startswith("【ナレーション】"):
+        print("警告: レスポンスに【ナレーション】が含まれていないため追加します")
+        caption = "【ナレーション】" + caption.strip()
     
-    # 説明が長すぎる場合は短く切り詰める
-    if len(caption) > 50:
-        print(f"説明が長すぎます（{len(caption)}文字）。50文字に切り詰めます。")
-        caption = caption[:47] + "..."
+    # 説明が長すぎる場合の警告（ただし切り詰めはしない）
+    if len(caption) > 200:
+        print(f"注意: ナレーションが長めです（{len(caption)}文字）。")
     
-    print(f"\n生成されたシーン説明: {caption}")
-    print(f"=== シーン説明生成完了 ===")
+    print(f"\n生成されたシーンナレーション: {caption}")
+    print(f"=== シーンナレーション生成完了 ===")
     return caption
 
-def generate_captions_from_scenario(input_srt_file: str, output_srt_file: str, scenario_file: str, scene_duration: int = SCENE_DURATION, gemini_api_key: str = None, serper_api_key: str = None, disable_web_search: bool = None) -> None:
+def split_narration_into_chunks(narration: str, max_chars_per_chunk: int = 40) -> list:
+    """
+    ナレーションテキストを適切な長さのチャンクに分割します
+    
+    Args:
+        narration: 分割するナレーションテキスト
+        max_chars_per_chunk: 1チャンクあたりの最大文字数
+        
+    Returns:
+        分割されたチャンクのリスト
+    """
+    # 先頭の【ナレーション】を取り除く
+    if narration.startswith("【ナレーション】"):
+        text = narration[len("【ナレーション】"):]
+    else:
+        text = narration
+    
+    # テキストが短い場合はそのまま返す
+    if len(text) <= max_chars_per_chunk:
+        return [narration]
+    
+    chunks = []
+    
+    # 文単位で分割するための正規表現パターン
+    sentence_pattern = r'([^。！？\n]+[。！？\n])'
+    sentences = re.findall(sentence_pattern, text)
+    
+    if not sentences and text:
+        # 文区切りがない場合は単語単位で区切る
+        sentences = [text]
+    
+    current_chunk = "【ナレーション】"
+    for sentence in sentences:
+        # 現在のチャンクに追加しても長すぎない場合
+        if len(current_chunk) + len(sentence) <= max_chars_per_chunk:
+            current_chunk += sentence
+        else:
+            # 現在のチャンクが空でない場合は追加
+            if current_chunk != "【ナレーション】":
+                chunks.append(current_chunk)
+            
+            # 新しいチャンクを開始
+            current_chunk = "【ナレーション】" + sentence
+    
+    # 最後のチャンクを追加
+    if current_chunk != "【ナレーション】":
+        chunks.append(current_chunk)
+    
+    # チャンクが1つも作られなかった場合（文が非常に長い場合）
+    if not chunks:
+        # 強制的に分割
+        chunks = []
+        words = text.split()
+        current_chunk = "【ナレーション】"
+        
+        for word in words:
+            if len(current_chunk) + len(word) + 1 <= max_chars_per_chunk:  # +1 for space
+                if current_chunk != "【ナレーション】":
+                    current_chunk += " "
+                current_chunk += word
+            else:
+                chunks.append(current_chunk)
+                current_chunk = "【ナレーション】" + word
+        
+        if current_chunk != "【ナレーション】":
+            chunks.append(current_chunk)
+    
+    print(f"ナレーションを {len(chunks)} チャンクに分割しました: {chunks}")
+    return chunks
+
+def add_scene_descriptions_to_srt(input_srt_file: str, output_srt_file: str, scene_duration: int = SCENE_DURATION, gemini_api_key: str = None, serper_api_key: str = None, disable_web_search: bool = None, language: str = 'ja') -> None:
+    """
+    SRTファイルの字幕からシーン説明を生成し、新しいSRTファイルを作成します。
+    
+    Args:
+        input_srt_file: 入力SRTファイルのパス
+        output_srt_file: 出力SRTファイルのパス
+        scene_duration: 各シーンの長さ（秒）
+        gemini_api_key: Gemini API Key（あれば環境変数を上書き）
+        serper_api_key: Serper API Key（あれば環境変数を上書き）
+        disable_web_search: ウェブ検索を無効化するかどうか
+        language: 生成する言語コード（'ja', 'en', 'zh', 'ko'）
+    """
+    global API_KEY, SERPER_API_KEY, DISABLE_WEB_SEARCH
+    
+    # APIキーを設定
+    if gemini_api_key:
+        API_KEY = gemini_api_key
+    if serper_api_key:
+        SERPER_API_KEY = serper_api_key
+    if disable_web_search is not None:
+        DISABLE_WEB_SEARCH = disable_web_search
+    
+    print(f"処理を開始します: {input_srt_file} -> {output_srt_file}")
+    print(f"ウェブ検索モード: {'無効' if DISABLE_WEB_SEARCH else '有効'}")
+    
+    # SRTファイルの解析
+    srt_blocks = parse_srt_file(input_srt_file)
+    if not srt_blocks:
+        print(f"エラー: {input_srt_file} から字幕ブロックを解析できませんでした。")
+        return
+    
+    # 最後の字幕ブロックから動画の最大時間を取得
+    max_time = max(block.end_time for block in srt_blocks)
+    
+    # シーンブロックの作成
+    scene_blocks = create_scene_blocks(scene_duration, max_time)
+    
+    # シーン説明の生成と挿入
+    all_narration_chunks = []
+    
+    # API呼び出しの間隔を調整するための変数（秒）
+    api_call_interval = 0.5  # 0.5秒間隔に変更
+    
+    for scene_index, (scene_start, scene_end) in enumerate(scene_blocks):
+        print(f"\n*** シーン {scene_index+1}/{len(scene_blocks)}: {format_time(scene_start)} - {format_time(scene_end)} ***")
+        
+        # シーン内の字幕を収集
+        texts_in_scene = []
+        for block in srt_blocks:
+            if (block.start_time <= scene_end and block.end_time >= scene_start):
+                texts_in_scene.append(block.text)
+        
+        # シーン内に字幕がなければスキップ
+        if not texts_in_scene:
+            print(f"シーン {scene_index+1} にはテキストがありません。スキップします。")
+            continue
+        
+        # シーン内のテキストを結合
+        text_in_scene = "\n".join(texts_in_scene)
+        
+        # キーワードを抽出してWeb検索
+        search_result = ""
+        if not DISABLE_WEB_SEARCH:  # ウェブ検索が有効な場合のみ実行
+            keywords = extract_keywords_from_scene(srt_blocks, scene_start, scene_end)
+            if keywords:
+                search_query = f"{keywords} {SUPPORTED_LANGUAGES[language]['search_suffix']}"
+                search_result = search_web(search_query, language=language)
+                
+                # Web検索の後に少し待機してAPIレート制限を回避
+                if scene_index < len(scene_blocks) - 1:  # 最後のシーン以外で待機
+                    print(f"\n検索API呼び出し後、{api_call_interval}秒間待機します...")
+                    time.sleep(api_call_interval)
+        
+        # Gemini APIでシーンナレーションを生成
+        narration = generate_caption_with_gemini(text_in_scene, scene_start, scene_end, search_result=search_result, language=language)
+        
+        # ナレーションを適切なサイズのチャンクに分割
+        narration_chunks = split_narration_into_chunks(narration)
+        
+        # 各チャンクに時間情報を追加
+        chunk_duration = 5  # 各チャンクの表示時間（秒）
+        for i, chunk in enumerate(narration_chunks):
+            chunk_start = scene_start + (i * chunk_duration)
+            chunk_end = chunk_start + chunk_duration
+            # 最後のチャンクはシーン終了まで表示
+            if i == len(narration_chunks) - 1:
+                chunk_end = scene_end
+            all_narration_chunks.append((chunk_start, chunk_end, chunk))
+        
+        # 次のシーンの処理前に待機してAPIレート制限を回避
+        if scene_index < len(scene_blocks) - 1:  # 最後のシーン以外で待機
+            progress = f"進捗: {scene_index+1}/{len(scene_blocks)} シーン処理完了 ({(scene_index+1)*100/len(scene_blocks):.1f}%)"
+            print(f"\n{progress}")
+            print(f"Gemini API呼び出し後、{api_call_interval}秒間待機します...")
+            time.sleep(api_call_interval)
+    
+    # ナレーションブロックと元の字幕ブロックを結合
+    all_blocks = []
+    
+    # まず元の字幕ブロックをコピー
+    for block in srt_blocks:
+        all_blocks.append(block)
+    
+    # ナレーションブロックを追加
+    for chunk_index, (chunk_start, chunk_end, chunk_text) in enumerate(all_narration_chunks):
+        # ナレーション用の新しいインデックスを作成
+        new_index = len(srt_blocks) + chunk_index + 1
+        
+        # SRTフォーマットのタイムスタンプを生成
+        start_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(chunk_start)
+        end_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(chunk_end)
+        timestamp = f"{start_timestamp} --> {end_timestamp}"
+        
+        # ナレーションブロックを作成
+        narration_block = SRTBlock(new_index, timestamp, chunk_text)
+        all_blocks.append(narration_block)
+    
+    # インデックス順にソート
+    all_blocks.sort(key=lambda block: (block.start_time, block.index))
+    
+    # インデックスを振り直し
+    for i, block in enumerate(all_blocks):
+        block.index = i + 1
+    
+    # 出力ファイルに書き込み
+    output_dir = os.path.dirname(output_srt_file)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    with open(output_srt_file, 'w', encoding='utf-8') as file:
+        for i, block in enumerate(all_blocks):
+            file.write(str(block))
+            if i < len(all_blocks) - 1:
+                file.write("\n\n")
+    
+    print(f"\n処理完了: {len(all_narration_chunks)} 個のナレーションチャンクを生成し、{output_srt_file} に保存しました。")
+
+def generate_captions_from_scenario(input_srt_file: str, output_srt_file: str, scenario_file: str, scene_duration: int = SCENE_DURATION, gemini_api_key: str = None, serper_api_key: str = None, disable_web_search: bool = None, language: str = 'ja') -> None:
     """
     SRTファイルとシナリオファイルからシーン説明を生成し、新しいSRTファイルを作成します。
     
@@ -669,6 +984,7 @@ def generate_captions_from_scenario(input_srt_file: str, output_srt_file: str, s
         gemini_api_key: Gemini API Key（あれば環境変数を上書き）
         serper_api_key: Serper API Key（あれば環境変数を上書き）
         disable_web_search: ウェブ検索を無効化するかどうか
+        language: 生成する言語コード（'ja', 'en', 'zh', 'ko'）
     """
     global API_KEY, SERPER_API_KEY, DISABLE_WEB_SEARCH
     
@@ -704,11 +1020,10 @@ def generate_captions_from_scenario(input_srt_file: str, output_srt_file: str, s
     scene_blocks = create_scene_blocks(scene_duration, max_time)
     
     # シーン説明の生成と挿入
-    output_blocks = []
-    scene_descriptions = []
+    all_narration_chunks = []
     
     # API呼び出しの間隔を調整するための変数（秒）
-    api_call_interval = 3  # 3秒間隔
+    api_call_interval = 0.5  # 0.5秒間隔に変更
     
     for scene_index, (scene_start, scene_end) in enumerate(scene_blocks):
         print(f"\n*** シーン {scene_index+1}/{len(scene_blocks)}: {format_time(scene_start)} - {format_time(scene_end)} ***")
@@ -732,143 +1047,36 @@ def generate_captions_from_scenario(input_srt_file: str, output_srt_file: str, s
         if not DISABLE_WEB_SEARCH:  # ウェブ検索が有効な場合のみ実行
             keywords = extract_keywords_from_scene(srt_blocks, scene_start, scene_end)
             if keywords:
-                search_query = f"{keywords} 特徴 説明"
-                search_result = search_web(search_query)
+                search_query = f"{keywords} {SUPPORTED_LANGUAGES[language]['search_suffix']}"
+                search_result = search_web(search_query, language=language)
                 
                 # Web検索の後に少し待機してAPIレート制限を回避
                 if scene_index < len(scene_blocks) - 1:  # 最後のシーン以外で待機
                     print(f"\n検索API呼び出し後、{api_call_interval}秒間待機します...")
                     time.sleep(api_call_interval)
         
-        # Gemini APIでシーン説明を生成（シナリオ付き）
-        scene_description = generate_caption_with_gemini(text_in_scene, scene_start, scene_end, scenario_text, search_result)
-        scene_descriptions.append((scene_start, scene_end, scene_description))
-        
-        # 次のシーンの処理前に待機してAPIレート制限を回避
-        if scene_index < len(scene_blocks) - 1:  # 最後のシーン以外で待機
-            progress = f"進捗: {scene_index+1}/{len(scene_blocks)} シーン処理完了 ({(scene_index+1)*100/len(scene_blocks):.1f}%)"
-            print(f"\n{progress}")
-            print(f"Gemini API呼び出し後、{api_call_interval}秒間待機します...")
-            time.sleep(api_call_interval)
-    
-    # シーン説明ブロックを作成して元の字幕ブロックと結合
-    all_blocks = []
-    
-    # まず元の字幕ブロックをコピー
-    for block in srt_blocks:
-        all_blocks.append(block)
-    
-    # シーン説明ブロックを作成して追加
-    for scene_index, (scene_start, scene_end, scene_description) in enumerate(scene_descriptions):
-        # シーン説明用の新しいインデックスを作成（既存のブロック数 + シーンインデックス）
-        new_index = len(srt_blocks) + scene_index + 1
-        
-        # SRTフォーマットのタイムスタンプを生成
-        start_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(scene_start)
-        end_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(scene_start + 5)  # 5秒間表示
-        timestamp = f"{start_timestamp} --> {end_timestamp}"
-        
-        # シーン説明ブロックを作成
-        scene_block = SRTBlock(new_index, timestamp, scene_description)
-        all_blocks.append(scene_block)
-    
-    # インデックス順にソート
-    all_blocks.sort(key=lambda block: (block.start_time, block.index))
-    
-    # インデックスを振り直し
-    for i, block in enumerate(all_blocks):
-        block.index = i + 1
-    
-    # 出力ファイルに書き込み
-    output_dir = os.path.dirname(output_srt_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
-    with open(output_srt_file, 'w', encoding='utf-8') as file:
-        for i, block in enumerate(all_blocks):
-            file.write(str(block))
-            if i < len(all_blocks) - 1:
-                file.write("\n\n")
-    
-    print(f"\n処理完了: {len(scene_descriptions)} 個のシーン説明を生成し、{output_srt_file} に保存しました。")
-
-def add_scene_descriptions_to_srt(input_srt_file: str, output_srt_file: str, scene_duration: int = SCENE_DURATION, gemini_api_key: str = None, serper_api_key: str = None, disable_web_search: bool = None) -> None:
-    """
-    SRTファイルの字幕からシーン説明を生成し、新しいSRTファイルを作成します。
-    
-    Args:
-        input_srt_file: 入力SRTファイルのパス
-        output_srt_file: 出力SRTファイルのパス
-        scene_duration: 各シーンの長さ（秒）
-        gemini_api_key: Gemini API Key（あれば環境変数を上書き）
-        serper_api_key: Serper API Key（あれば環境変数を上書き）
-        disable_web_search: ウェブ検索を無効化するかどうか
-    """
-    global API_KEY, SERPER_API_KEY, DISABLE_WEB_SEARCH
-    
-    # APIキーを設定
-    if gemini_api_key:
-        API_KEY = gemini_api_key
-    if serper_api_key:
-        SERPER_API_KEY = serper_api_key
-    if disable_web_search is not None:
-        DISABLE_WEB_SEARCH = disable_web_search
-        
-    print(f"処理を開始します: {input_srt_file} -> {output_srt_file}")
-    print(f"ウェブ検索モード: {'無効' if DISABLE_WEB_SEARCH else '有効'}")
-    
-    # SRTファイルの解析
-    srt_blocks = parse_srt_file(input_srt_file)
-    if not srt_blocks:
-        print(f"エラー: {input_srt_file} から字幕ブロックを解析できませんでした。")
-        return
-    
-    # 最後の字幕ブロックから動画の最大時間を取得
-    max_time = max(block.end_time for block in srt_blocks)
-    
-    # シーンブロックの作成
-    scene_blocks = create_scene_blocks(scene_duration, max_time)
-    
-    # シーン説明の生成と挿入
-    output_blocks = []
-    scene_descriptions = []
-    
-    # API呼び出しの間隔を調整するための変数（秒）
-    api_call_interval = 3  # 3秒間隔
-    
-    for scene_index, (scene_start, scene_end) in enumerate(scene_blocks):
-        print(f"\n*** シーン {scene_index+1}/{len(scene_blocks)}: {format_time(scene_start)} - {format_time(scene_end)} ***")
-        
-        # シーン内の字幕を収集
-        texts_in_scene = []
-        for block in srt_blocks:
-            if (block.start_time <= scene_end and block.end_time >= scene_start):
-                texts_in_scene.append(block.text)
-        
-        # シーン内に字幕がなければスキップ
-        if not texts_in_scene:
-            print(f"シーン {scene_index+1} にはテキストがありません。スキップします。")
-            continue
-        
-        # シーン内のテキストを結合
-        text_in_scene = "\n".join(texts_in_scene)
-        
-        # キーワードを抽出してWeb検索
-        search_result = ""
-        if not DISABLE_WEB_SEARCH:  # ウェブ検索が有効な場合のみ実行
+        # シーンに関連するシナリオの部分を抽出
+        relevant_scenario = ""
+        if scenario_text:
             keywords = extract_keywords_from_scene(srt_blocks, scene_start, scene_end)
             if keywords:
-                search_query = f"{keywords} 特徴 説明"
-                search_result = search_web(search_query)
-                
-                # Web検索の後に少し待機してAPIレート制限を回避
-                if scene_index < len(scene_blocks) - 1:  # 最後のシーン以外で待機
-                    print(f"\n検索API呼び出し後、{api_call_interval}秒間待機します...")
-                    time.sleep(api_call_interval)
+                relevant_scenario = match_scene_with_scenario(keywords, scenario_text)
         
-        # Gemini APIでシーン説明を生成
-        scene_description = generate_caption_with_gemini(text_in_scene, scene_start, scene_end, search_result=search_result)
-        scene_descriptions.append((scene_start, scene_end, scene_description))
+        # Gemini APIでシーンナレーションを生成（シナリオ付き）
+        narration = generate_caption_with_gemini(text_in_scene, scene_start, scene_end, relevant_scenario, search_result, language)
+        
+        # ナレーションを適切なサイズのチャンクに分割
+        narration_chunks = split_narration_into_chunks(narration)
+        
+        # 各チャンクに時間情報を追加
+        chunk_duration = 5  # 各チャンクの表示時間（秒）
+        for i, chunk in enumerate(narration_chunks):
+            chunk_start = scene_start + (i * chunk_duration)
+            chunk_end = chunk_start + chunk_duration
+            # 最後のチャンクはシーン終了まで表示
+            if i == len(narration_chunks) - 1:
+                chunk_end = scene_end
+            all_narration_chunks.append((chunk_start, chunk_end, chunk))
         
         # 次のシーンの処理前に待機してAPIレート制限を回避
         if scene_index < len(scene_blocks) - 1:  # 最後のシーン以外で待機
@@ -877,26 +1085,26 @@ def add_scene_descriptions_to_srt(input_srt_file: str, output_srt_file: str, sce
             print(f"Gemini API呼び出し後、{api_call_interval}秒間待機します...")
             time.sleep(api_call_interval)
     
-    # シーン説明ブロックを作成して元の字幕ブロックと結合
+    # ナレーションブロックと元の字幕ブロックを結合
     all_blocks = []
     
     # まず元の字幕ブロックをコピー
     for block in srt_blocks:
         all_blocks.append(block)
     
-    # シーン説明ブロックを作成して追加
-    for scene_index, (scene_start, scene_end, scene_description) in enumerate(scene_descriptions):
-        # シーン説明用の新しいインデックスを作成（既存のブロック数 + シーンインデックス）
-        new_index = len(srt_blocks) + scene_index + 1
+    # ナレーションブロックを追加
+    for chunk_index, (chunk_start, chunk_end, chunk_text) in enumerate(all_narration_chunks):
+        # ナレーション用の新しいインデックスを作成
+        new_index = len(srt_blocks) + chunk_index + 1
         
         # SRTフォーマットのタイムスタンプを生成
-        start_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(scene_start)
-        end_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(scene_start + 5)  # 5秒間表示
+        start_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(chunk_start)
+        end_timestamp = SRTBlock(0, "", "").get_formatted_timestamp(chunk_end)
         timestamp = f"{start_timestamp} --> {end_timestamp}"
         
-        # シーン説明ブロックを作成
-        scene_block = SRTBlock(new_index, timestamp, scene_description)
-        all_blocks.append(scene_block)
+        # ナレーションブロックを作成
+        narration_block = SRTBlock(new_index, timestamp, chunk_text)
+        all_blocks.append(narration_block)
     
     # インデックス順にソート
     all_blocks.sort(key=lambda block: (block.start_time, block.index))
@@ -916,7 +1124,7 @@ def add_scene_descriptions_to_srt(input_srt_file: str, output_srt_file: str, sce
             if i < len(all_blocks) - 1:
                 file.write("\n\n")
     
-    print(f"\n処理完了: {len(scene_descriptions)} 個のシーン説明を生成し、{output_srt_file} に保存しました。")
+    print(f"\n処理完了: {len(all_narration_chunks)} 個のナレーションチャンクを生成し、{output_srt_file} に保存しました。")
 
 def main():
     """メイン関数"""
@@ -927,6 +1135,7 @@ def main():
     parser.add_argument('--duration', type=int, default=SCENE_DURATION, help='シーンの長さ（秒）')
     parser.add_argument('--gemini_api_key', help='GeminiのAPIキー')
     parser.add_argument('--serper_api_key', help='SerperのAPIキー')
+    parser.add_argument('--language', choices=['ja', 'en', 'zh', 'ko'], default='ja', help='生成する言語（ja:日本語, en:英語, zh:中国語, ko:韓国語）')
     
     args = parser.parse_args()
     
@@ -936,7 +1145,8 @@ def main():
         args.scenario_file,
         args.duration,
         args.gemini_api_key,
-        args.serper_api_key
+        args.serper_api_key,
+        language=args.language
     )
 
 if __name__ == "__main__":

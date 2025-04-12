@@ -63,3 +63,18 @@ tmp/
 # 出力ファイル
 *.edl
 *.srt
+
+# Environment variables
+.env
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+
+# Settings
+scene_gen_settings.json

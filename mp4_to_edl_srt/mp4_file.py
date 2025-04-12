@@ -142,6 +142,7 @@ class MP4File:
         self.srt_data: SRTData = SRTData()
         self.creation_time: Optional[str] = None
         self.timecode_offset: Optional[str] = None
+        self.duration: Optional[float] = None  # 動画の長さ（秒単位）
         
         # ファイルのメタデータを抽出
         self.extract_metadata()
@@ -163,6 +164,11 @@ class MP4File:
             
             result = subprocess.run(command, check=True, capture_output=True, text=True)
             metadata = json.loads(result.stdout)
+            
+            # 動画の長さを取得
+            if "format" in metadata and "duration" in metadata["format"]:
+                self.duration = float(metadata["format"]["duration"])
+                print(f"ビデオの長さ: {self.duration} 秒 ({self._seconds_to_timecode(self.duration)})")
             
             # creation_timeを探す
             if "format" in metadata and "tags" in metadata["format"]:
@@ -562,14 +568,18 @@ class MP4File:
         # EDLイベントとそのレコードタイムコードを保存するリスト
         self.edl_events_with_timecode = []
         
-        # 内部タイムコードの終了時間を計算（開始時間 + 1時間と仮定）
+        # 内部タイムコードの終了時間を計算（実際の動画長を使用）
         if self.timecode_offset and self.timecode_offset != "00:00:00:00":
             start_time_seconds = self._timecode_to_seconds(self.timecode_offset)
-            end_time_seconds = start_time_seconds + 3600  # 1時間後
+            # 動画の長さが取得できていれば使用、そうでなければデフォルトの1時間を使用
+            if self.duration:
+                end_time_seconds = start_time_seconds + self.duration
+            else:
+                end_time_seconds = start_time_seconds + 3600  # 1時間後（フォールバック）
             print(f"内部タイムコード範囲: {self.timecode_offset} - {self._seconds_to_timecode(end_time_seconds)}")
         
         # 最小長さ（フレーム数）の設定
-        min_duration_frames = 5  # 最低5フレーム以上のセグメントのみ処理
+        min_duration_frames = 5
         
         for segment in self.segments:
             # タイムコードオフセットを適用（オプション）
@@ -605,6 +615,10 @@ class MP4File:
                 int(source_out_parts[2]) * 30 +
                 int(source_out_parts[3])
             )
+            
+            # オフラインエラー防止のためsource_outを1フレーム短くする
+            source_out_frames -= 1
+            source_out = self._frames_to_timecode(source_out_frames)
             
             # セグメントのフレーム数を計算
             segment_frames = source_out_frames - source_in_frames
@@ -690,4 +704,12 @@ class MP4File:
         """Converts HH:MM:SS:FF to seconds (30 fps)."""
         hh, mm, ss, ff = map(int, timecode.split(":"))
         return hh * 3600 + mm * 60 + ss + ff / 30.0
+
+    def _frames_to_timecode(self, total_frames: int) -> str:
+        """フレーム数からHH:MM:SS:FF形式のタイムコードに変換します（30 fps）。"""
+        hours = total_frames // (3600 * 30)
+        minutes = (total_frames % (3600 * 30)) // (60 * 30)
+        secs = (total_frames % (60 * 30)) // 30
+        frames = total_frames % 30
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}:{frames:02d}"
 
