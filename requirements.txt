@@ -1,4 +1,9 @@
-whisper>=1.0.0
+ffmpeg-python
+faster-whisper>=0.9.0
+pyyaml
+whisper
 torch>=2.0.0
 pydub>=0.25.1
-faster-whisper>=0.9.0
+pydub
+opencv-python
+whisper>=1.0.0

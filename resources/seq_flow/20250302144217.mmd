@@ -1,0 +1,71 @@
+```mermaid
+sequenceDiagram
+    participant Main as Main
+    participant Config as Config
+    participant TC as TimecodeConverter
+    participant SA as SceneAnalyzer
+    participant MP4Proc as MP4FileProcessor
+    participant Seg as Segment
+    participant SceneObj as Scene
+    participant EDL as EDLData
+    participant SRT as SRTData
+
+    Main->>Config: read config.json
+    Main->>TC: create TimecodeConverter(frame_rate=30)
+    Main->>SA: create SceneAnalyzer(config, frame_rate=30)
+
+    loop over MP4 files in folder
+        Main->>MP4Proc: create MP4FileProcessor(filepath, config, tc, frame_rate=30)
+        activate MP4Proc
+        MP4Proc->>MP4Proc: extract_audio()
+        MP4Proc->>MP4Proc: transcribe()
+
+        alt scene analysis enabled in config
+            MP4Proc->>SA: analyze_frames(filepath, progress_callback)
+            activate SA
+            SA-->>MP4Proc: return list<Scene>
+            deactivate SA
+            MP4Proc->>MP4Proc: store scenes
+        end
+
+        MP4Proc->>MP4Proc: segment_audio()
+
+        alt scene analysis enabled and scenes detected
+             MP4Proc->>MP4Proc: assign_scene_info_to_segments()
+        end
+
+        loop over processed segments
+            MP4Proc->>Seg: create Segment object(data)
+        end
+
+        alt scene analysis enabled and scenes detected
+            loop over detected scenes
+                 MP4Proc->>SceneObj: create Scene object(data)
+            end
+        end
+
+        MP4Proc->>EDL: generate_edl_data() 
+        activate EDL
+        EDL-->>MP4Proc: return EDLData
+        deactivate EDL
+
+        MP4Proc->>SRT: generate_srt_data() 
+        activate SRT
+        SRT-->>MP4Proc: return SRTData
+        deactivate SRT
+
+        MP4Proc->>EDL: to_string(tc)
+        activate EDL
+        EDL-->>MP4Proc: return edl_string
+        deactivate EDL
+        MP4Proc->>MP4Proc: write_edl_file(edl_string)
+
+        MP4Proc->>SRT: to_string(tc)
+        activate SRT
+        SRT-->>MP4Proc: return srt_string
+        deactivate SRT
+        MP4Proc->>MP4Proc: write_srt_file(srt_string)
+
+        deactivate MP4Proc
+    end
+```

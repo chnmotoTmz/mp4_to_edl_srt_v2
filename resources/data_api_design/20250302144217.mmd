@@ -1,0 +1,87 @@
+```mermaid
+classDiagram
+    class MP4FileProcessor {
+        -filepath: str
+        -audio_filepath: str
+        -transcription: str
+        -segments: list<Segment>
+        -scenes: list<Scene>
+        -config: dict
+        -timecode_converter: TimecodeConverter
+        -frame_rate: int
+        +__init__(filepath: str, config: dict, timecode_converter: TimecodeConverter, frame_rate: int): None
+        +process(): None
+        -extract_audio() -> None
+        -extract_frames() -> None
+        -transcribe() -> None
+        -detect_scenes(scene_analyzer: SceneAnalyzer) -> None
+        -segment_audio() -> None
+        -assign_scene_info_to_segments() -> None
+        -generate_edl_data() -> EDLData
+        -generate_srt_data() -> SRTData
+        -write_edl_file(edl_data: EDLData) -> None
+        -write_srt_file(srt_data: SRTData) -> None
+    }
+    class Segment {
+        -start_time_ms: int
+        -end_time_ms: int
+        -transcription: str
+        -scene_id: Optional[int]
+        -scene_description: Optional[str]
+        +__init__(start_time_ms: int, end_time_ms: int, transcription: str, scene_id: Optional[int] = None, scene_description: Optional[str] = None): None
+        +get_start_timecode_srt(converter: TimecodeConverter) -> str
+        +get_end_timecode_srt(converter: TimecodeConverter) -> str
+    }
+    class Scene {
+        -start_time_ms: int
+        -end_time_ms: int
+        -scene_id: int
+        -description: str
+        +__init__(start_time_ms: int, end_time_ms: int, scene_id: int, description: str): None
+        +get_start_timecode_edl(converter: TimecodeConverter) -> str
+        +get_end_timecode_edl(converter: TimecodeConverter) -> str
+    }
+    class SceneAnalyzer {
+        -config: dict
+        -frame_rate: int
+        -total_frames: int
+        -model: Any
+        +__init__(config: dict, frame_rate: int): None
+        +analyze_frames(video_filepath: str, progress_callback: Callable[[int, int], None]) -> list<Scene>
+        -_load_model() -> Any
+        -_classify_frame(frame_path: str) -> str
+        -_detect_scene_changes(classifications: list<tuple<int, str>>) -> list<Scene>
+    }
+    class TimecodeConverter {
+        -frame_rate: int
+        +__init__(frame_rate: int): None
+        +ms_to_hhmmssff(ms: int) -> str
+        +ms_to_hhmmssmmm(ms: int) -> str
+        +hhmmssff_to_ms(tc: str) -> int
+        +hhmmssmmm_to_ms(tc: str) -> int
+    }
+    class EDLData {
+        -title: str
+        -fcm: str
+        -events: list<dict>
+        +__init__(title: str, fcm: str): None
+        +add_event(event: dict) -> None
+        +to_string(timecode_converter: TimecodeConverter) -> str
+    }
+    class SRTData {
+        -segments: list<dict>
+        +__init__(): None
+        +add_segment(segment: dict) -> None
+        +to_string(timecode_converter: TimecodeConverter) -> str
+    }
+    MP4FileProcessor *-- Segment
+    MP4FileProcessor *-- Scene
+    MP4FileProcessor --> SceneAnalyzer
+    MP4FileProcessor --> TimecodeConverter
+    MP4FileProcessor --> EDLData
+    MP4FileProcessor --> SRTData
+    Segment --> TimecodeConverter
+    Scene --> TimecodeConverter
+    EDLData --> TimecodeConverter
+    SRTData --> TimecodeConverter
+```
