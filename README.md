@@ -285,3 +285,4 @@ This setting allows Resolve to skip offline clips during rendering rather than s
 
 手動で設定ファイルを編集する必要はありません。アプリケーションの使用中に設定が自動的に保存されます。
 # mp4_to_edl_srt_v2
+# mp4_to_edl_srt_v2
