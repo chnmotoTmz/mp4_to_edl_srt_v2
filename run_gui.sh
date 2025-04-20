@@ -23,7 +23,7 @@ if ! python -c "import tkinter" &> /dev/null; then
 fi
 
 echo "GUIアプリケーションを起動しています..."
-python mp4_to_edl_srt/gui.py
+python -m mp4_to_edl_srt.gui
 
 if [ $? -ne 0 ]; then
     echo "エラーが発生しました。詳細はログを確認してください。"

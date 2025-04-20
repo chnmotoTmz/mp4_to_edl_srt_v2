@@ -1,9 +1,12 @@
 import re
-from typing import Dict
+from typing import Dict, Optional, List, TYPE_CHECKING
 
+# Avoid circular import for type hinting
+if TYPE_CHECKING:
+    from mp4_to_edl_srt.timecode_utils import TimecodeConverter
 
 class Segment:
-    def __init__(self, start_timecode: str, end_timecode: str, transcription: str):
+    def __init__(self, start_timecode: str, end_timecode: str, transcription: str, scene_id: Optional[int] = None, scene_description: Optional[str] = None, transcription_good_reason: Optional[str] = None, transcription_bad_reason: Optional[str] = None, source_timecode_offset: Optional[str] = None, source_filename: Optional[str] = None, file_index: Optional[int] = None):
         """
         Initializes a segment with start and end timecodes and transcription.
 
@@ -11,11 +14,25 @@ class Segment:
             start_timecode: The start timecode in HH:MM:SS:FF format.
             end_timecode: The end timecode in HH:MM:SS:FF format.
             transcription: The transcription text for this segment.
+            scene_id: Optional identifier for the scene this segment belongs to.
+            scene_description: Optional textual description of the scene.
+            transcription_good_reason: Optional tag indicating a positive aspect of the transcription.
+            transcription_bad_reason: Optional tag indicating a negative aspect of the transcription.
+            source_timecode_offset: Optional timecode offset (HH:MM:SS:FF) of the source MP4 file.
+            source_filename: Optional filename of the source MP4 file.
+            file_index: Optional index of the source MP4 file (for reel name).
         """
         self.start_timecode = start_timecode
         self.end_timecode = end_timecode
         # 日本語テキストの場合、単語間の不要なスペースを削除
         self.transcription = self._clean_japanese_text(transcription)
+        self.scene_id = scene_id
+        self.scene_description = scene_description
+        self.transcription_good_reason = transcription_good_reason
+        self.transcription_bad_reason = transcription_bad_reason
+        self.source_timecode_offset = source_timecode_offset # Store the offset
+        self.source_filename = source_filename # Store source filename
+        self.file_index = file_index           # Store file index
 
     def _clean_japanese_text(self, text: str) -> str:
         """
@@ -73,25 +90,47 @@ class Segment:
 
     def __str__(self) -> str:
         """Returns a string representation of the segment."""
-        return f"{self.start_timecode} - {self.end_timecode}: {self.transcription}"
+        reason_str = ""
+        if self.transcription_good_reason:
+            reason_str += f" [Good: {self.transcription_good_reason}]"
+        if self.transcription_bad_reason:
+            reason_str += f" [Bad: {self.transcription_bad_reason}]"
+        scene_info = f" (Scene: {self.scene_id})" if self.scene_id else ""
+        offset_info = f" (Offset: {self.source_timecode_offset})" if self.source_timecode_offset else ""
+        source_info = f" (Source: {self.source_filename}[{self.file_index}])" if self.source_filename and self.file_index is not None else ""
+        return f"{self.start_timecode} - {self.end_timecode}: {self.transcription}{scene_info}{reason_str}{offset_info}{source_info}"
 
     def to_dict(self) -> Dict:
-        """Converts the segment to a dictionary for EDL."""
-        return {
-            "source_in": self.start_timecode,
-            "source_out": self.end_timecode,
+        """Converts the segment to a dictionary suitable for JSON output."""
+        data = {
+            "start_timecode": self.start_timecode,
+            "end_timecode": self.end_timecode,
             "transcription": self.transcription,
+            "scene_id": self.scene_id,
+            "scene_description": self.scene_description,
+            "transcription_good_reason": self.transcription_good_reason,
+            "transcription_bad_reason": self.transcription_bad_reason,
+            "source_timecode_offset": self.source_timecode_offset,
+            "source_filename": self.source_filename,
+            "file_index": self.file_index
         }
+        return data
 
     def to_srt_dict(self) -> Dict:
         """Converts the segment to a dictionary for SRT with millisecond precision."""
         # Convert HH:MM:SS:FF to HH:MM:SS,MMM
         start_srt = self._convert_to_srt_time(self.start_timecode)
         end_srt = self._convert_to_srt_time(self.end_timecode)
+
+        # Combine transcription with scene description if available
+        text = self.transcription
+        if self.scene_description:
+            text = f"[{self.scene_description}] {text}"
+
         return {
             "start_time": start_srt,
             "end_time": end_srt,
-            "text": self.transcription,
+            "text": text,
         }
 
     def _convert_to_srt_time(self, timecode: str) -> str:

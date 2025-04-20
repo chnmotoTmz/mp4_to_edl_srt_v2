@@ -5,11 +5,17 @@ import pydub
 import re
 import json
 import torch  # torchを明示的にインポート
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Callable
 import warnings
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
-from datetime import datetime, timedelta
+from datetime import datetime
+import logging
+import traceback
+from dataclasses import dataclass
+from mp4_to_edl_srt.api_client import GeminiClient
+import tempfile
+import shutil # For cleaning up temporary directory
 
 # faster-whisperのサポートを追加（インストールされていない場合はスキップ）
 try:
@@ -21,20 +27,25 @@ except ImportError:
     print("faster-whisperライブラリが見つかりません。標準モードで実行します。")
     print("高速モードを使用するには次のコマンドを実行してください: pip install faster-whisper")
 
-from segment import Segment
-from edl_data import EDLData
-from srt_data import SRTData
+from mp4_to_edl_srt.segment import Segment
+from mp4_to_edl_srt.edl_data import EDLData
+from mp4_to_edl_srt.srt_data import SRTData
+from mp4_to_edl_srt.scene import Scene
+from mp4_to_edl_srt.scene_analysis import SceneAnalyzer
+from mp4_to_edl_srt.timecode_utils import TimecodeConverter
 
 # Whisperの警告を非表示にする
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
+
+logger = logging.getLogger(__name__)
 
 class ConfigManager:
     """アプリケーション設定を管理するクラス"""
     
     DEFAULT_CONFIG = {
         "whisper": {
-            "model": "small",
-            "language": "ja",
+            "model": "large-v3",
+            "language": "auto",
             "initial_prompt": "日本語での自然な会話。",
             "temperature": 0.0,
             "beam_size": 5,
@@ -66,6 +77,10 @@ class ConfigManager:
             "font_size": 10,
             "window_width": 800,
             "window_height": 900
+        },
+        "scene_analysis": {
+            "enabled": False,
+            "frame_analysis_rate": 30
         }
     }
     
@@ -132,20 +147,32 @@ class ConfigManager:
         self.config[section].update(values)
 
 class MP4File:
-    def __init__(self, filepath: str, file_index: int):
+    def __init__(self, filepath: str, file_index: int, converter: TimecodeConverter, scene_analyzer: Optional[SceneAnalyzer] = None):
         self.filepath: str = os.path.normpath(filepath)
         self.file_index: int = file_index  # For reel name (e.g., TAPE01)
+        self.converter = converter # Store the TimecodeConverter
+        self.scene_analyzer = scene_analyzer # Store the SceneAnalyzer (optional)
         self.audio_filepath: str = ""
         self.transcription_result: Dict = {}
         self.segments: List[Segment] = []
-        self.edl_data: EDLData = EDLData(title="My Video Project", fcm="NON-DROP FRAME")
-        self.srt_data: SRTData = SRTData()
+        self.detected_scenes: List[Scene] = [] # List to store detected scenes
+        self.edl_data: EDLData = EDLData(title="My Video Project", fcm="NON-DROP FRAME", converter=self.converter) # Pass the converter instance when initializing EDLData
+        self.srt_data: SRTData = SRTData(converter=self.converter) # Pass converter to SRTData
         self.creation_time: Optional[str] = None
-        self.timecode_offset: Optional[str] = None
+        self.timecode_offset: Optional[str] = "00:00:00:00" # Default offset
         self.duration: Optional[float] = None  # 動画の長さ（秒単位）
         
         # ファイルのメタデータを抽出
         self.extract_metadata()
+
+        # --- Add GeminiClient initialization --- 
+        # Get GeminiClient from SceneAnalyzer if available
+        self.gemini_client: Optional[GeminiClient] = scene_analyzer.gemini_client if scene_analyzer and hasattr(scene_analyzer, 'gemini_client') else None
+        if self.gemini_client:
+             logger.debug("MP4File initialized with GeminiClient.")
+        else:
+             logger.debug("MP4File initialized without GeminiClient (SceneAnalyzer might be missing or lack the client).")
+        # --- End GeminiClient initialization ---
 
     def extract_metadata(self) -> None:
         """MP4ファイルからメタデータ（作成時間やタイムコード）を抽出します。"""
@@ -215,28 +242,13 @@ class MP4File:
             print(f"警告: デフォルトのタイムコードを使用します。")
             self.timecode_offset = "00:00:00:00"
 
-    def apply_timecode_offset(self, timecode: str) -> str:
-        """
-        タイムコードにオフセットを適用します。
-        
-        Args:
-            timecode: 元のタイムコード (HH:MM:SS:FF形式)
-            
-        Returns:
-            オフセットが適用されたタイムコード
-        """
+    def apply_timecode_offset(self, timecode_ms: int) -> int:
+        """タイムコード (ミリ秒) にオフセットを適用します。"""
         if not self.timecode_offset or self.timecode_offset == "00:00:00:00":
-            return timecode
-            
-        # タイムコードを秒に変換
-        tc_seconds = self._timecode_to_seconds(timecode)
-        offset_seconds = self._timecode_to_seconds(self.timecode_offset)
-        
-        # オフセットを適用
-        result_seconds = tc_seconds + offset_seconds
-        
-        # 秒をタイムコードに戻す
-        return self._seconds_to_timecode(result_seconds)
+            return timecode_ms
+
+        offset_ms = self.converter.hhmmssff_to_ms(self.timecode_offset)
+        return timecode_ms + offset_ms
 
     def extract_audio(self) -> None:
         """Extracts audio from the MP4 file using FFmpeg."""
@@ -257,204 +269,302 @@ class MP4File:
             result = subprocess.run(command, check=True, capture_output=True, text=True)
             print(f"音声ファイルを抽出しました: {self.audio_filepath}")
         except subprocess.CalledProcessError as e:
-            print(f"FFmpegエラー: {e.stderr}")
+            logger.error(f"FFmpegエラー: {e.stderr}")
             raise Exception(f"FFmpeg error: {e.stderr}")
 
-    def transcribe(self, initial_prompt: str = None) -> None:
-        """Transcribes the audio file using Whisper with word-level timestamps."""
-        try:
-            if not os.path.exists(self.audio_filepath):
-                raise FileNotFoundError(f"音声ファイルが見つかりません: {self.audio_filepath}")
-            
-            # PyTorchの警告を抑制
-            warnings.filterwarnings("ignore", category=FutureWarning, module="whisper")
-            
-            # GPUメモリの最適化設定
-            os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512,expandable_segments:True'
-            
-            # 音声前処理の有効/無効を環境変数から取得
-            enable_preprocessing = os.environ.get("ENABLE_AUDIO_PREPROCESSING", "True").lower() == "true"
-            
-            # 音声ファイルの前処理（オプション）
-            audio_file_to_use = self.audio_filepath
-            if enable_preprocessing:
-                print("音声前処理を実行します...")
-                audio_file_to_use = self._preprocess_audio(self.audio_filepath)
-            else:
-                print("音声前処理をスキップします - 元の音声ファイルを使用")
-            
-            # 初期プロンプトが指定されていない場合はデフォルト値を使用
-            if initial_prompt is None:
-                # より控えめな初期プロンプトを使用
-                initial_prompt = ""  # 空のプロンプトに変更
-                
-            print(f"文字起こし中: {audio_file_to_use}")
-            print(f"使用する初期プロンプト: {initial_prompt}")
+    def transcribe(
+        self,
+        model_name: str = "small",
+        language: str = "ja",
+        initial_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        beam_size: int = 5,
+        condition_on_previous: bool = True,
+        device: str = "auto",
+        compute_type: str = "default", # for faster-whisper
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> None:
+        """Extracts audio, performs transcription, and evaluates segments using batch API call."""
+        logger.info(f">>> Entering transcribe method for {os.path.basename(self.filepath)}")
+        config = ConfigManager().load_config()
+        enable_preprocessing = config.get("audio", {}).get("preprocessing", False)
 
-            # faster-whisperが利用可能で、高速モードが選択されている場合
-            use_faster_whisper = FASTER_WHISPER_AVAILABLE
+        if not self.audio_filepath or not os.path.exists(self.audio_filepath):
+            logger.info("オーディオファイルパスが無効です。オーディオ抽出を試みます...")
+            self.extract_audio()
+
+            if not self.audio_filepath or not os.path.exists(self.audio_filepath):
+                 logger.error("オーディオ抽出に失敗、またはファイルが見つかりません。文字起こしをスキップします。")
+                 self.transcription_result = {"text": "ERROR: Audio Extraction Failed", "segments": [], "language": "error"}
+                 self.segments = []
+                 # Restore original exit log placement
+                 logger.info("文字起こしリソースを解放しました。") 
+                 logger.info(f"<<< Exiting transcribe method for {os.path.basename(self.filepath)}") 
+                 return
+
+        logger.info(f"'{self.filepath}' の文字起こしを開始中...")
+        logger.info(f"モデル: {model_name}, デバイス: {device}, ComputeType: {compute_type}")
+        # logger.debug("--- Past initial info logs, before device/compute type checks ---") # Remove this debug log
+
+        # --- Restore the original logic block --- 
+        # Use device setting from whisper config if auto
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"自動デバイス検出: {device}")
+        
+        # Select compute type for faster-whisper based on device
+        if FASTER_WHISPER_AVAILABLE and compute_type == "default":
+            if device == "cuda":
+                # Check GPU capability for FP16/INT8
+                # Defaulting to int8 for broader compatibility, even on CUDA
+                compute_type = "int8" 
+                logger.info(f"Faster-Whisper: GPU detected, using compute_type='{compute_type}' for better compatibility")
+            else:
+                compute_type = "int8"
+                logger.info(f"Faster-Whisper: CPU detected, using compute_type='{compute_type}'")
+        elif not FASTER_WHISPER_AVAILABLE:
+             compute_type = "default" # Ensure compute_type is not used for standard whisper
+        
+        # Determine which audio file to use based on preprocessing setting
+        audio_file_to_use = self.audio_filepath
+        preprocessed_audio_path = ""
+        if enable_preprocessing:
+            logger.info("音声前処理が有効です。試行します...")
+            try:
+                preprocessed_audio_path = self._preprocess_audio(self.audio_filepath)
+                if preprocessed_audio_path and os.path.exists(preprocessed_audio_path):
+                    audio_file_to_use = preprocessed_audio_path
+                    logger.info(f"前処理済み音声を使用: {audio_file_to_use}")
+                else:
+                    logger.warning("音声前処理に失敗しました。元のファイルを使用します。")
+            except Exception as preprocess_err:
+                logger.error(f"音声前処理中に予期せぬエラー: {preprocess_err}")
+                logger.warning("元の音声ファイルを使用します。")
+        else:
+            logger.info("音声前処理は無効です。")
+        
+        # Load Model function (definition only)
+        model = None
+        def load_model_safely(m_name, dev):
+            nonlocal model # Allow modification of the outer scope variable
+            try:
+                logger.info(f"Whisperモデル '{m_name}' ({dev}) をロード中...")
+                # Disable FP16 on CPU explicitly for standard whisper
+                use_fp16 = False if dev == 'cpu' else None 
+                model = whisper.load_model(m_name, device=dev)
+                logger.info(f"モデル '{m_name}' ({dev}) のロード成功.")
+                return model
+            except Exception as e:
+                logger.error(f"モデル '{m_name}' ({dev}) のロード中にエラー: {e}")
+                if dev == "cuda": torch.cuda.empty_cache() # Free memory on CUDA failure
+                return None
+        # --- End of restored block ---
+
+        # Remove the hardcoded values
+        # if device == "auto": device = "cpu"
+        # if compute_type == "default": compute_type = "int8" if FASTER_WHISPER_AVAILABLE else "default"
+        # audio_file_to_use = self.audio_filepath
+        # preprocessed_audio_path = ""
+        # model = None
+        # def load_model_safely(m_name, dev):
+        #     nonlocal model
+        #     try: logger.info(f"(Simplified) Loading model {m_name} on {dev}..."); model = whisper.load_model(m_name, device=dev); logger.info("Load successful."); return model
+        #     except Exception as e: logger.error(f"Load failed: {e}"); return None
+
+        # Perform transcription (try block starts here)
+        # logger.debug("Preparing for transcription try block...") # Remove this debug log
+        try:
+            raw_segments_for_json = [] # To store raw data for transcription_whisper_result
+            self.segments = [] # Reset internal segments list
             
-            if use_faster_whisper:
-                print("faster-whisperを使用して文字起こしを実行します（高速モード）")
-                # CTranslate2最適化されたモデルを使用
+            # --- Actual Transcription Call (Faster-Whisper or Standard Whisper) ---
+            if FASTER_WHISPER_AVAILABLE and compute_type != "default":
+                logger.info("Attempting transcription using faster-whisper...")
                 try:
-                    # 高速なwhisperモデルを使用 - 常にCPUで実行
-                    model = WhisperModel(
-                        model_size_or_path="deepdml/faster-whisper-large-v3-turbo-ct2", 
-                        device="cpu",  # 常にCPUを使用 
-                        compute_type="int8"  # int8量子化で効率的に実行
-                    )
+                    logger.debug(f"Loading faster-whisper model: {model_name}, device={device}, compute_type={compute_type}")
+                    fw_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+                    logger.debug("Faster-whisper model loaded successfully.")
                     
-                    print("モデル情報: large-v3-turbo (CPU, int8量子化)")
-                    
-                    # faster-whisperのTranscribeオプション
-                    segments, info = model.transcribe(
+                    # Determine language parameter for faster-whisper
+                    effective_language = None # Default to None for auto-detect
+                    # Get language from config (passed via transcribe arguments)
+                    config_lang = config.get('whisper', {}).get('language', 'auto') 
+                    if config_lang and config_lang.lower() != "auto":
+                        effective_language = config_lang # Use specified language if not 'auto'
+                    logger.info(f"Using language '{effective_language if effective_language else 'auto'}' for faster-whisper.")
+
+                    segments_iterator, info = fw_model.transcribe(
                         audio_file_to_use,
-                        language="ja",
-                        task="transcribe",
+                        language=effective_language,
                         initial_prompt=initial_prompt,
-                        condition_on_previous_text=True,
-                        temperature=0.2,
-                        beam_size=5,
+                        temperature=temperature,
+                        beam_size=beam_size,
+                        condition_on_previous_text=condition_on_previous,
                         word_timestamps=True,
-                        vad_filter=True,  # 音声区間検出フィルタを有効化
-                        vad_parameters={"min_silence_duration_ms": 500}  # 無音区間のパラメータ
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500)
                     )
-                    
-                    print(f"検出された言語: {info.language} (確度: {info.language_probability:.2f})")
-                    
-                    # セグメントを保存
-                    self.segments = []
-                    for segment in segments:
-                        words = []
-                        if hasattr(segment, 'words') and segment.words:
-                            for word in segment.words:
-                                words.append({
-                                    "word": word.word,
-                                    "start": word.start,
-                                    "end": word.end,
-                                    "probability": word.probability
-                                })
+                    detected_lang = info.language
+                    logger.info(f"Faster-Whisper 検出言語: {detected_lang}, 確率: {info.language_probability:.2f}")
+                    total_duration_ms = (self.duration or 0) * 1000
+
+                    logger.info("Faster-Whisper セグメントを処理中 (評価は後で一括実行)...")
+                    segment_count = 0
+                    for segment in segments_iterator:
+                        start_ms = int(segment.start * 1000)
+                        end_ms = int(segment.end * 1000)
+                        text = segment.text.strip()
+                        start_timecode = self.converter.ms_to_hhmmssff(start_ms)
+                        end_timecode = self.converter.ms_to_hhmmssff(end_ms)
                         
-                        # faster-whisperのセグメントをアプリケーション形式に変換
-                        # start -> start_timecode, end -> end_timecode, text -> transcription
-                        start_timecode = self._seconds_to_timecode(segment.start)
-                        end_timecode = self._seconds_to_timecode(segment.end)
-                        self.segments.append(Segment(
+                        app_segment = Segment(
                             start_timecode=start_timecode,
                             end_timecode=end_timecode,
-                            transcription=segment.text
-                        ))
-                    
-                    # 結果を保存
-                    self.transcription_result = {
-                        "text": " ".join([segment.text for segment in segments]),
-                        "segments": [{
-                            "start": segment.start,
-                            "end": segment.end,
-                            "text": segment.text
-                        } for segment in segments],
-                        "language": info.language
-                    }
-                    
-                    # EDLとSRTデータを生成
-                    self.generate_edl_data("00:00:00:00")
-                    self.generate_srt_data()
-                    return
-                    
-                except Exception as e:
-                    print(f"faster-whisperでのエラー: {str(e)}")
-                    print("標準のwhisperにフォールバックします...")
-            
-            # 標準のwhisperを使用する場合は、ここから下の既存のコードを実行
-            # 勾配計算を無効化
-            torch.set_grad_enabled(False)
-            
-            # CUDA初期化前の設定
-            if torch.cuda.is_available():
-                # GPUキャッシュをクリア
-                torch.cuda.empty_cache()
-                # メモリの断片化を防ぐ
-                torch.cuda.memory.set_per_process_memory_fraction(0.8)  # GPUメモリの80%まで使用に制限
-                # CUDAストリームを同期
-                torch.cuda.synchronize()
-                
-                # CUBLASワークスペースを制限
-                os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-                
-                # 利用可能なGPUメモリをチェック
-                total_memory = torch.cuda.get_device_properties(0).total_memory
-                available_memory = total_memory - torch.cuda.memory_allocated(0)
-                print(f"利用可能なGPUメモリ: {available_memory / 1024**3:.2f} GB")
-            
-            # モデルロードの関数を定義
-            def load_model_safely(model_name, device):
-                try:
-                    # 古いバージョンのWhisperでは一部のパラメータがサポートされていないため削除
-                    model = whisper.load_model(
-                        model_name,
-                        device=device,
-                        download_root=os.path.join(os.path.expanduser("~"), ".cache", "whisper")
-                    )
-                    return model
-                except Exception as e:
-                    print(f"モデルロード中のエラー: {str(e)}")
-                    return None
-            
-            # モデルサイズの要件（より現実的な見積もり）
-            model_memory_requirements = {
-                "medium": 5 * 1024**3,     # 5GB
-                "small": 2 * 1024**3       # 2GB
-            }
-            
-            # モデル選択
-            model = None
-            
-            if torch.cuda.is_available():
-                # 利用可能なメモリに基づいてモデルを選択
-                for model_name, required_memory in model_memory_requirements.items():
-                    if available_memory >= required_memory * 1.2:  # 20%のバッファを追加
-                        print(f"選択したモデル: {model_name} (必要メモリ: {required_memory / 1024**3:.1f}GB)")
-                        model = load_model_safely(model_name, "cuda")
-                        if model is not None:
-                            print(f"{model_name}モデルのロードに成功しました")
-                            break
-                        else:
-                            torch.cuda.empty_cache()
-                            torch.cuda.synchronize()
-            
-            # どのモデルもロードできなかった場合、CPUでsmallモデルを使用
-            if model is None:
-                print("警告: GPUモデルのロードに失敗したため、CPUでsmallモデルを使用します")
-                model = load_model_safely("small", "cpu")
-                if model is None:
-                    raise Exception("すべてのモデルのロードに失敗しました")
-                print("smallモデルをCPUにロードしました")
-            
-            # 文字起こしを実行
-            transcribe_options = {
-                "language": "ja",
-                "task": "transcribe",
-                "temperature": 0.2,
-                "beam_size": 5,
-                "initial_prompt": initial_prompt,
-                "condition_on_previous_text": True,
-                "verbose": True,
-                "fp16": False,  # 精度を優先
-                "suppress_tokens": [-1]  # 特殊トークンを抑制
-            }
-            
-            # 文字起こしを実行
-            result = model.transcribe(audio_file_to_use, **transcribe_options)
-            
-            self.transcription_result = result
-            
-            print(f"文字起こし完了: {len(self.transcription_result.get('segments', []))}セグメント")
-        except Exception as e:
-            print(f"文字起こし中にエラーが発生しました: {str(e)}")
-            raise Exception(f"Whisper transcription error: {e}")
+                            transcription=text,
+                            transcription_good_reason=None,
+                            transcription_bad_reason=None
+                        )
+                        self.segments.append(app_segment)
+                        raw_segments_for_json.append({"start": segment.start, "end": segment.end, "text": text})
+                        segment_count += 1
+                        
+                        # Report progress
+                        if progress_callback and total_duration_ms > 0:
+                             progress = min(segment.end * 1000 / total_duration_ms, 1.0)
+                             progress_callback(int(progress*100), 100)
 
-    def _preprocess_audio(self, audio_path: str) -> str:
+                    self.transcription_result = {
+                        "text": " ".join([s["text"] for s in raw_segments_for_json]),
+                        "segments": raw_segments_for_json,
+                        "language": detected_lang
+                    }
+                    logger.info(f"faster-whisper 文字起こし完了. {len(self.segments)} 個の内部セグメントを作成 (評価前).")
+                except Exception as fw_err:
+                     logger.error(f"faster-whisper実行中にエラー: {fw_err}", exc_info=True)
+                     logger.warning("標準のwhisperにフォールバックします...")
+                     # Ensure faster-whisper specific flags are reset if falling back
+                     compute_type = "default"
+                     # FASTER_WHISPER_AVAILABLE = False # Don't disable permanently, just for this run
+                     # Fall through to standard whisper block by ensuring the condition below is met
+                     model = None # Ensure standard whisper model is loaded if fallback happens
+
+            # Standard Whisper execution block (runs if faster-whisper failed or is disabled, or fallback needed)
+            # Use 'model is None' to check if standard model needs loading (either initially or due to fallback)
+            # logger.debug(f"Checking if standard whisper should be used (model is None: {model is None}, FASTER_WHISPER_AVAILABLE: {FASTER_WHISPER_AVAILABLE}, compute_type: {compute_type})...") # Remove this debug log
+            if model is None and (not FASTER_WHISPER_AVAILABLE or compute_type == "default"):
+                logger.info("Attempting transcription using standard whisper...")
+                # model = load_model_safely(model_name, device) <-- Moved call below
+                
+                # Load the model here
+                model = load_model_safely(model_name, device)
+                
+                if not model:
+                     # If standard model also fails, record error and exit transcribe method
+                     logger.critical(f"標準whisperモデル '{model_name}' ({device}) のロードにも失敗しました。文字起こしを中止します。")
+                     # ... (rest of the error handling for model load failure) ...
+                     # Ensure audio file cleanup happens before returning
+                     if preprocessed_audio_path and os.path.exists(preprocessed_audio_path):
+                          try: os.remove(preprocessed_audio_path); logger.info(f"一時前処理ファイルを削除: {preprocessed_audio_path}")
+                          except OSError as e: logger.warning(f"一時ファイル削除エラー: {e}")
+                     logger.info("文字起こしリソースを解放しました。") 
+                     logger.info(f"<<< Exiting transcribe method for {os.path.basename(self.filepath)}") 
+                     return # Exit transcribe
+
+                # Standard whisper transcription with word timestamps
+                # Note: Standard whisper's progress isn't easily usable here.
+                whisper_options = dict(
+                    language=language if language and language != "auto" else None, 
+                    initial_prompt=initial_prompt, 
+                    temperature=temperature, 
+                    beam_size=beam_size, 
+                    condition_on_previous_text=condition_on_previous,
+                    word_timestamps=True,
+                    fp16 = False if device == 'cpu' else None # Disable FP16 on CPU
+                )
+                logger.info(f"標準Whisper オプション: {whisper_options}")
+                logger.debug("Calling standard whisper model.transcribe()...")
+                self.transcription_result = model.transcribe(
+                    self.audio_filepath, # Use potentially preprocessed audio
+                    **whisper_options
+                )
+                if progress_callback:
+                    progress_callback(100, 100) # Mark as complete after standard whisper finishes
+                logger.info(f"標準whisper 文字起こし完了.")
+            # --- End Transcription Call ---
+
+            # --- Post-Transcription Processing (Common logic if transcription_result has segments) ---
+            # This block now only populates self.segments if standard whisper ran and self.segments is empty
+            if not self.segments and isinstance(self.transcription_result, dict) and self.transcription_result.get("segments"):
+                whisper_segments = self.transcription_result.get("segments", [])
+                logger.info(f"標準Whisperセグメントを処理中 ({len(whisper_segments)}個) (評価は後で一括実行)...")
+                raw_segments_for_json = [] # Reset for standard whisper case
+                for idx, segment_data in enumerate(whisper_segments):
+                    start_ms = int(segment_data["start"] * 1000)
+                    end_ms = int(segment_data["end"] * 1000)
+                    text = segment_data.get("text", "").strip()
+                    start_timecode = self.converter.ms_to_hhmmssff(start_ms)
+                    end_timecode = self.converter.ms_to_hhmmssff(end_ms)
+
+                    segment = Segment(
+                        start_timecode=start_timecode,
+                        end_timecode=end_timecode,
+                        transcription=text,
+                        transcription_good_reason=None,
+                        transcription_bad_reason=None
+                    )
+                    self.segments.append(segment)
+                    raw_segments_for_json.append({"start": segment_data["start"], "end": segment_data["end"], "text": text}) # Add raw data
+                # Update transcription_result text if standard whisper was used
+                if not self.transcription_result.get("text"): # Avoid overwriting if faster-whisper populated it
+                     self.transcription_result["text"] = " ".join([s.get("text", "") for s in whisper_segments])
+                self.transcription_result["segments"] = raw_segments_for_json # Ensure raw segments are stored
+                     
+                logger.info(f"{len(self.segments)}個の内部セグメントオブジェクトを作成しました (評価前)。")
+            # --- End Post-Transcription Segment Creation ---
+            
+            # --- Batch Evaluate Transcriptions --- 
+            if self.gemini_client and self.segments:
+                logger.info(f"一括文字起こし評価を開始 (対象セグメント数: {len(self.segments)})...")
+                transcriptions_to_evaluate = [seg.transcription for seg in self.segments]
+                try:
+                    evaluation_results = self.gemini_client.evaluate_transcription_batch(transcriptions_to_evaluate)
+                    
+                    if len(evaluation_results) == len(self.segments):
+                        logger.info("バッチ評価結果をセグメントに割り当て中...")
+                        for segment, (good, bad) in zip(self.segments, evaluation_results):
+                            segment.transcription_good_reason = good
+                            segment.transcription_bad_reason = bad
+                        logger.info("バッチ評価結果の割り当て完了。")
+                    else:
+                        logger.warning(f"バッチ文字起こし評価が不正な数の結果を返しました ({len(evaluation_results)} vs {len(self.segments)})。評価タグは割り当てられません。")
+                except Exception as eval_err:
+                    logger.error(f"バッチ文字起こし評価中にエラーが発生しました: {eval_err}", exc_info=True)
+            elif not self.gemini_client:
+                logger.warning("GeminiClientが利用できないため、文字起こし評価をスキップします。")
+            # --- End Batch Evaluation ---
+            
+            # --- English Re-transcription block REMOVED --- 
+
+        except Exception as e:
+            logger.error(f"文字起こし中にエラーが発生しました: {str(e)}")
+            if 'model' in locals() and model is not None:
+                del model
+            if 'fw_model' in locals() and 'fw_model' in locals() and fw_model is not None:
+                 del fw_model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.debug("GPUキャッシュをクリアしました。")
+            logger.info("文字起こしリソースを解放しました。")
+            # Restore original exit log position
+            logger.info(f"<<< Exiting transcribe method for {os.path.basename(self.filepath)}") 
+            # raise Exception(f"Whisper transcription error: {e}") # Re-raise if needed, or handle
+
+        finally:
+            # ... (Resource cleanup) ...
+            logger.info("文字起こしリソースを解放しました。") 
+            logger.info(f"<<< Exiting transcribe method for {os.path.basename(self.filepath)}")
+
+    def _preprocess_audio(self, audio_path: str) -> Optional[str]:
         """音声ファイルの前処理（ノイズ除去と音量調整）を行います。"""
         try:
             print(f"音声ファイルを前処理中: {audio_path}")
@@ -554,141 +664,66 @@ class MP4File:
         self.segments.append(Segment(start_timecode, end_timecode, transcription))
         print(f"セグメント追加: {start_timecode} - {end_timecode}")
 
-    def generate_edl_data(self, record_start: str, use_timecode_offset: bool = True) -> Tuple[EDLData, str]:
-        """Generates EDL data with sequential record timecodes."""
+    def generate_edl_data(self, use_timecode_offset: bool = True) -> Tuple[EDLData, str]:
+        """
+        Generates EDL data from the segments.
+        
+        Args:
+            use_timecode_offset: Whether to apply the timecode offset.
+            
+        Returns:
+            A tuple containing the EDLData object and the record start timecode.
+        """
+        edl = EDLData(title=f"{os.path.basename(self.filepath)}_Transcription", fcm="NON-DROP FRAME")
         reel_name = f"TAPE{self.file_index:02d}"
-        current_record = self._timecode_to_seconds(record_start)
+        
+        record_start_ms = 0
+        if use_timecode_offset:
+             record_start_ms = self.converter.hhmmssff_to_ms(self.timecode_offset)
+        
+        record_start_tc = self.converter.ms_to_hhmmssff(record_start_ms)
+        print(f"Generating EDL with Record Start: {record_start_tc} (Offset Applied: {use_timecode_offset})")
 
-        print(f"EDLデータを生成中 (リール名: {reel_name}, 開始レコード: {record_start})...")
-        print(f"タイムコードオフセットの使用: {'有効' if use_timecode_offset else '無効'}")
-        
-        # EDLイベントのリストをクリア
-        self.edl_data = EDLData(title="My Video Project", fcm="NON-DROP FRAME")
-        
-        # EDLイベントとそのレコードタイムコードを保存するリスト
-        self.edl_events_with_timecode = []
-        
-        # 内部タイムコードの終了時間を計算（実際の動画長を使用）
-        if self.timecode_offset and self.timecode_offset != "00:00:00:00":
-            start_time_seconds = self._timecode_to_seconds(self.timecode_offset)
-            # 動画の長さが取得できていれば使用、そうでなければデフォルトの1時間を使用
-            if self.duration:
-                end_time_seconds = start_time_seconds + self.duration
-            else:
-                end_time_seconds = start_time_seconds + 3600  # 1時間後（フォールバック）
-            print(f"内部タイムコード範囲: {self.timecode_offset} - {self._seconds_to_timecode(end_time_seconds)}")
-        
-        # 最小長さ（フレーム数）の設定
-        min_duration_frames = 5
-        
-        for segment in self.segments:
-            # タイムコードオフセットを適用（オプション）
-            if use_timecode_offset and self.timecode_offset:
-                source_in = self.apply_timecode_offset(segment.start_timecode)
-                source_out = self.apply_timecode_offset(segment.end_timecode)
-                
-                # 内部タイムコードの範囲をチェック
-                source_out_seconds = self._timecode_to_seconds(source_out)
-                if source_out_seconds > end_time_seconds:
-                    print(f"警告: セグメントの終了時間 ({source_out}) が内部タイムコードの範囲を超えています。終了時間を調整します。")
-                    source_out = self._seconds_to_timecode(end_time_seconds)
-                    
-                print(f"タイムコードオフセット適用: {segment.start_timecode} → {source_in}")
-            else:
-                source_in = segment.start_timecode
-                source_out = segment.end_timecode
+        current_record_ms = record_start_ms
+
+        for i, segment in enumerate(self.segments):
+            source_start_ms = self.converter.hhmmssff_to_ms(segment.start_timecode)
+            source_end_ms = self.converter.hhmmssff_to_ms(segment.end_timecode)
+            duration_ms = source_end_ms - source_start_ms
             
-            # セグメントの長さを計算
-            source_in_parts = source_in.split(':')
-            source_out_parts = source_out.split(':')
+            record_end_ms = current_record_ms + duration_ms
             
-            # タイムコードをフレームに変換
-            source_in_frames = (
-                int(source_in_parts[0]) * 3600 * 30 +
-                int(source_in_parts[1]) * 60 * 30 +
-                int(source_in_parts[2]) * 30 +
-                int(source_in_parts[3])
-            )
-            source_out_frames = (
-                int(source_out_parts[0]) * 3600 * 30 +
-                int(source_out_parts[1]) * 60 * 30 +
-                int(source_out_parts[2]) * 30 +
-                int(source_out_parts[3])
-            )
-            
-            # オフラインエラー防止のためsource_outを1フレーム短くする
-            source_out_frames -= 1
-            source_out = self._frames_to_timecode(source_out_frames)
-            
-            # セグメントのフレーム数を計算
-            segment_frames = source_out_frames - source_in_frames
-            
-            # 短いセグメントをスキップ
-            if segment_frames < min_duration_frames:
-                print(f"短いセグメントをスキップ: {source_in} → {source_out} (フレーム数: {segment_frames})")
-                continue
-            
-            duration = self._timecode_to_seconds(source_out) - self._timecode_to_seconds(source_in)
-            record_in = self._seconds_to_timecode(current_record)
-            record_out = self._seconds_to_timecode(current_record + duration)
-            
-            # ビデオとオーディオを含むイベント（DaVinci Resolveで正しく認識される形式）
-            main_event = {
+            event = {
+                "event_num": f"{i+1:03d}",
                 "reel_name": reel_name,
-                "track_type": "AA/V",  # オーディオとビデオの両方
-                "transition": "C",
-                "source_in": source_in,
-                "source_out": source_out,
-                "record_in": record_in,
-                "record_out": record_out,
-                "clip_name": os.path.basename(self.filepath),
+                "track_type": "A", # Audio only for transcription
+                "transition": "C", # Cut
+                "source_in": segment.start_timecode,
+                "source_out": segment.end_timecode,
+                "record_in": self.converter.ms_to_hhmmssff(current_record_ms),
+                "record_out": self.converter.ms_to_hhmmssff(record_end_ms),
+                "clip_name": f"Segment {i+1}",
+                "comment": segment.transcription, # Use transcription as comment
+                "scene_description": segment.scene_description # Pass scene description
             }
-            self.edl_data.add_event(main_event)
+            edl.add_event(event)
             
-            # EDLイベントとそのレコードタイムコードを保存（SRT生成用）
-            self.edl_events_with_timecode.append({
-                "segment": segment,
-                "record_in": record_in,
-                "record_out": record_out
-            })
-            
-            current_record += duration
-
-        new_record_start = self._seconds_to_timecode(current_record)
-        print(f"EDLデータ生成完了: {len(self.edl_data.events)}イベント, 次の開始レコード: {new_record_start}")
-        return self.edl_data, new_record_start
+            current_record_ms = record_end_ms
+        
+        self.edl_data = edl # Store generated EDL data
+        return edl, record_start_tc
 
     def generate_srt_data(self) -> SRTData:
-        """Generates SRT data based on EDL record timecodes."""
-        print(f"SRTデータを生成中...")
-        
-        # SRTデータを初期化
-        self.srt_data = SRTData()
-        
-        # EDLのレコードタイムコードに基づいてSRTセグメントを生成
-        if hasattr(self, 'edl_events_with_timecode') and self.edl_events_with_timecode:
-            print(f"EDLのレコードタイムコードに基づいてSRTデータを生成します")
-            
-            for event in self.edl_events_with_timecode:
-                segment = event["segment"]
-                record_in = event["record_in"]
-                record_out = event["record_out"]
-                
-                # EDLのレコードタイムコードを使用して新しいセグメントを作成
-                srt_segment = Segment(
-                    record_in,
-                    record_out,
-                    segment.transcription
-                )
-                
-                self.srt_data.add_segment(srt_segment)
-        else:
-            # EDLデータがない場合は元のセグメントを使用
-            print(f"警告: EDLデータが見つかりません。元のセグメントを使用します。")
-            for segment in self.segments:
-                self.srt_data.add_segment(segment)
-        
-        print(f"SRTデータ生成完了: {len(self.srt_data.segments)}セグメント")
+        """
+        Generates SRT data from the segments.
+        The SRTData object already holds the segments and the converter.
+        """
+        # Clear existing segments in srt_data and add current ones
+        self.srt_data.segments = [] 
+        for segment in self.segments:
+             self.srt_data.add_segment(segment)
+        # Segments in self.srt_data now have scene info assigned (if analysis ran)
+        # SRTData's write_to_file method will handle the rest using the converter
         return self.srt_data
 
     def _seconds_to_timecode(self, seconds: float) -> str:
@@ -712,4 +747,89 @@ class MP4File:
         secs = (total_frames % (60 * 30)) // 30
         frames = total_frames % 30
         return f"{hours:02d}:{minutes:02d}:{secs:02d}:{frames:02d}"
+
+    def run_scene_analysis(self, frame_analysis_rate: int, capture_output_dir: Optional[str] = None):
+        """Runs scene analysis if the analyzer is available."""
+        if not self.scene_analyzer:
+            print("Scene analyzer not provided. Skipping scene analysis.")
+            return
+
+        print("Starting scene analysis...")
+        # The progress callback is now handled during SceneAnalyzer initialization.
+        # Remove the nested wrapper and the progress_callback argument from analyze_video call.
+
+        try:
+             # Call analyze_video without the progress_callback argument, but with capture_output_dir
+             self.detected_scenes = self.scene_analyzer.analyze_video(
+                 self.filepath,
+                 frame_analysis_rate,
+                 capture_output_dir=capture_output_dir # Pass the directory
+             )
+             print(f"Scene analysis complete. Found {len(self.detected_scenes)} scenes.")
+             self.assign_scenes_to_segments() # Assign scenes after analysis
+        except Exception as e:
+             print(f"Error during scene analysis: {e}")
+             self.detected_scenes = [] # Ensure list is empty on error
+        finally:
+            # Final progress update might need adjustment if handled differently now
+            # Let's rely on the analyzer's final _report_progress(1.0)
+            pass
+            # if progress_callback:
+            #     progress_callback(0.9) # REMOVED - Handled by analyzer's callback
+
+    def assign_scenes_to_segments(self):
+         """Assigns detected scene information to transcription segments based on time overlap."""
+         if not self.detected_scenes or not self.segments:
+             print("No scenes detected or no segments to assign to. Skipping scene assignment.")
+             return
+
+         print(f"Assigning {len(self.detected_scenes)} scenes to {len(self.segments)} segments...")
+         assigned_count = 0
+         for segment in self.segments:
+             segment_start_ms = self.converter.hhmmssff_to_ms(segment.start_timecode)
+             segment_end_ms = self.converter.hhmmssff_to_ms(segment.end_timecode)
+             segment_mid_ms = segment_start_ms + (segment_end_ms - segment_start_ms) / 2
+
+             best_match_scene = None
+             for scene in self.detected_scenes:
+                 if scene.start_ms <= segment_mid_ms < scene.end_ms:
+                     best_match_scene = scene
+                     break # Found the containing scene
+
+             if best_match_scene:
+                 segment.scene_id = best_match_scene.scene_id
+                 segment.scene_description = best_match_scene.description
+                 assigned_count += 1
+             # else: # Optional: Log segments that don't fall into any scene
+             #    print(f"  Warning: Segment {segment.start_timecode}-{segment.end_timecode} did not match any scene.")
+
+         print(f"Assigned scene information to {assigned_count} segments.")
+
+    def get_intermediate_data_as_dict(self) -> Dict[str, Any]:
+        """Gathers all processed data into a dictionary for JSON serialization."""
+        logger.info("中間データ辞書を作成中...") # Changed to logger
+        
+        # Ensure transcription_result exists and has expected keys, provide defaults otherwise
+        whisper_result = self.transcription_result if isinstance(self.transcription_result, dict) else {}
+
+        data = {
+            "source_filepath": self.filepath,
+            "file_index": self.file_index,
+            "extracted_audio_filepath": self.audio_filepath if self.audio_filepath and os.path.exists(self.audio_filepath) else None,
+            "metadata": {
+                "duration_seconds": self.duration,
+                "creation_time_utc": self.creation_time,
+                "timecode_offset": self.timecode_offset,
+            },
+            # Ensure transcription_result format is consistent even on errors
+            "transcription_whisper_result": {
+                "text": whisper_result.get("text", ""),
+                "segments": whisper_result.get("segments", []),
+                "language": whisper_result.get("language", "unknown")
+            },
+            "detected_scenes": [scene.to_dict(self.converter) for scene in self.detected_scenes], # Use Scene.to_dict
+            "final_segments": [segment.to_dict() for segment in self.segments] # Use Segment.to_dict
+        }
+        logger.info("中間データ辞書作成完了。") # Changed to logger
+        return data
 

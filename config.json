@@ -1,0 +1,41 @@
+{
+    "whisper": {
+        "model": "large-v3",
+        "language": "auto",
+        "initial_prompt": "日本語での自然な会話。",
+        "temperature": 0.0,
+        "beam_size": 5,
+        "condition_on_previous": false
+    },
+    "audio": {
+        "sample_rate": 44100,
+        "channels": 2,
+        "format": "wav",
+        "preprocessing": false
+    },
+    "segmentation": {
+        "threshold": 0.5,
+        "min_segment_length": 0.2,
+        "max_segment_length": 30.0,
+        "merge_threshold": 0.3
+    },
+    "edl": {
+        "title": "MP4 to EDL Project",
+        "fcm": "NON-DROP FRAME",
+        "use_timecode_offset": true
+    },
+    "paths": {
+        "last_input_folder": "G:/ts",
+        "last_output_folder": "G:/ts"
+    },
+    "gui": {
+        "theme": "default",
+        "font_size": 10,
+        "window_width": 800,
+        "window_height": 900
+    },
+    "scene_analysis": {
+        "enabled": true,
+        "frame_analysis_rate": 30
+    }
+}
