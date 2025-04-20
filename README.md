@@ -92,15 +92,6 @@ This project is currently in beta. Basic features are implemented, but there are
 - Unstable progress bar updates
 - No cancel functionality during processing
 
-### Future Development Plans
-
-- Enhanced Whisper model selection
-- Expanded language setting options
-- Audio processing parameter adjustment
-- Memory usage optimization
-- GUI functionality improvements and stabilization
-- **Additional interface languages**
-
 ### Feedback Request
 
 This tool is under development and has room for improvement. We appreciate feedback on:
@@ -228,43 +219,34 @@ python main.py --input /path/to/input/folder --output /path/to/output/folder
 
 ### 既知の問題点
 
-#### 音声抽出に関する問題
-- 一部のMP4ファイルで音声ストリームの検出に失敗することがある
-- 音声品質によって文字起こしの精度が大きく変動する
+#### Audio Extraction Issues
+- Some MP4 files may fail to detect audio streams
+- Transcription accuracy varies significantly depending on audio quality
 
-#### EDL/SRT生成の課題
-- タイムコードが正確に同期しないケースがある
-- 長時間の動画処理時にメモリ使用量が増大する
+#### EDL/SRT Generation Challenges
+- Timecode synchronization issues in some cases
+- Increased memory usage when processing long videos
 
-#### GUI関連
-- プログレスバーの更新が不安定
-- 処理中のキャンセル機能が未実装
+#### GUI Related
+- Unstable progress bar updates
+- No cancel functionality during processing
 
-### 今後の開発予定
+### Feedback Request
 
-- Whisperモデルの選択機能の強化
-- 言語設定オプションの拡充
-- 音声処理パラメータの調整機能
-- メモリ使用量の最適化
-- GUIの機能改善と安定化
-- **インターフェース言語の追加**
+This tool is under development and has room for improvement. We appreciate feedback on:
+- Bugs or operational issues
+- Needed features or options
+- Usage observations
 
-### フィードバックのお願い
+### Handling Offline Clips in DaVinci Resolve
 
-このツールは開発途中であり、多くの改善の余地があります。以下のような情報をいただけると助かります：
-- バグや動作の問題点
-- 必要な機能やオプション
-- 使用時の気づき
+If you encounter offline media errors when importing EDL files into DaVinci Resolve, you can configure Resolve to continue rendering by:
 
-### DaVinci Resolveでのオフラインクリップエラー対処法
+1. Go to Preferences → User → User Interface Settings
+2. Uncheck "Stop rendering when a frame or clip cannot be processed"
+3. Click "Save"
 
-EDLファイルをDaVinci Resolveにインポートした際にオフラインメディアエラーが発生した場合、以下の設定でレンダリングを中断せず続行できます:
-
-1. 「環境設定」→「ユーザー」→「ユーザーインターフェース設定」を開く
-2. 「処理できないフレーム/クリップがある場合にレンダリングを停止」のチェックを外す
-3. 「保存」をクリック
-
-この設定により、オフラインクリップはスキップされ、レンダリングプロセス全体が停止することなく完了します。
+This setting allows Resolve to skip offline clips during rendering rather than stopping the entire process.
 
 ### 注意事項
 - 処理時間は動画の長さやPCのスペックによって変動します
@@ -302,3 +284,4 @@ EDLファイルをDaVinci Resolveにインポートした際にオフライン�
 ```
 
 手動で設定ファイルを編集する必要はありません。アプリケーションの使用中に設定が自動的に保存されます。
+# mp4_to_edl_srt_v2
