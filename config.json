@@ -25,8 +25,8 @@
         "use_timecode_offset": true
     },
     "paths": {
-        "last_input_folder": "G:/ts",
-        "last_output_folder": "G:/ts"
+        "last_input_folder": "G:/100GOPRO",
+        "last_output_folder": "G:/100GOPRO"
     },
     "gui": {
         "theme": "default",

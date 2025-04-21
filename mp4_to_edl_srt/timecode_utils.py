@@ -5,7 +5,7 @@ class TimecodeConverter:
     Handles timecode conversions for a specific frame rate.
     Assumes non-drop frame.
     """
-    def __init__(self, frame_rate: int = 30):
+    def __init__(self, frame_rate: int = 60):
         self.frame_rate = frame_rate
 
     def ms_to_hhmmssff(self, ms: int) -> str:
@@ -16,7 +16,7 @@ class TimecodeConverter:
         minutes = (total_frames % (3600 * self.frame_rate)) // (60 * self.frame_rate)
         secs = (total_frames % (60 * self.frame_rate)) // self.frame_rate
         frames = total_frames % self.frame_rate
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}:{frames:02d}"
+        return f"{int(hours):02d}:{int(minutes):02d}:{int(secs):02d}:{int(frames):02d}"
 
     def ms_to_hhmmssmmm(self, ms: int) -> str:
         """Converts milliseconds to HH:MM:SS,MMM format."""

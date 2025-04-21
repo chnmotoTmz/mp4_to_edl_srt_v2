@@ -124,8 +124,8 @@ class Segment:
 
         # Combine transcription with scene description if available
         text = self.transcription
-        if self.scene_description:
-            text = f"[{self.scene_description}] {text}"
+        # if self.scene_description: # COMMENTED OUT: Do not add scene description to SRT text
+        #     text = f"[{self.scene_description}] {text}" # COMMENTED OUT
 
         return {
             "start_time": start_srt,

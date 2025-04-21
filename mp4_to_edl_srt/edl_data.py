@@ -34,8 +34,15 @@ class EDLData:
         if not self.segments:
             return f"TITLE: {self.title}\nFCM: {self.fcm}\n\n* No segments found.\n"
 
-        # Sort segments by absolute start time
-        sorted_segments = sorted(self.segments, key=self._get_absolute_start_ms)
+        # Sort segments first by file_index, then by relative start time (in ms)
+        # Convert start_timecode (HH:MM:SS:FF) to ms for sorting
+        sorted_segments = sorted(
+            self.segments, 
+            key=lambda seg: (
+                seg.file_index if seg.file_index is not None else 0, # Sort by file index (use 0 if None)
+                self.converter.hhmmssff_to_ms(seg.start_timecode) # Then by relative start time in ms
+            )
+        )
 
         edl_lines = []
         edl_lines.append(f"TITLE: {self.title}")
@@ -86,9 +93,9 @@ class EDLData:
             edl_lines.append(clip_line)
             
             # Optional: Add comment line if needed (scene desc or transcription)
-            if comment:
-                comment_line = f"* COMMENT: {comment}" 
-                edl_lines.append(comment_line)
+            # if comment: # COMMENTED OUT: Do not add COMMENT lines to EDL
+            #     comment_line = f"* COMMENT: {comment}" 
+            #     edl_lines.append(comment_line)
                 
             # Add empty line between events for readability (optional)
             edl_lines.append("") 

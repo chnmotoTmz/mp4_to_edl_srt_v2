@@ -20,13 +20,14 @@ class SRTData:
 
     def write_to_file(self, output_path: str) -> None:
         """Writes the SRT data to a file, sorted by absolute start time."""
-        # セグメントを開始時間 (ミリ秒) + オフセット (ミリ秒) でソート
-        def get_absolute_start_ms(seg: Segment) -> int:
-            relative_start_ms = self.converter.hhmmssff_to_ms(seg.start_timecode)
-            offset_ms = self.converter.hhmmssff_to_ms(seg.source_timecode_offset or '00:00:00:00')
-            return relative_start_ms + offset_ms
-            
-        sorted_segments = sorted(self.segments, key=get_absolute_start_ms)
+        # Sort segments first by file_index, then by relative start time (in ms) - Same as EDL
+        sorted_segments = sorted(
+            self.segments, 
+            key=lambda seg: (
+                seg.file_index if seg.file_index is not None else 0, # Sort by file index (use 0 if None)
+                self.converter.hhmmssff_to_ms(seg.start_timecode) # Then by relative start time in ms
+            )
+        )
         
         with open(output_path, 'w', encoding='utf-8') as f:
             current_srt_time_ms = 0 # Initialize sequence time for SRT
@@ -48,8 +49,8 @@ class SRTData:
                 # Use the existing to_srt_dict logic carefully, or get text directly
                 # srt_dict = segment.to_srt_dict() # This recalculates relative time, avoid it here
                 text = segment.transcription
-                if segment.scene_description:
-                    text = f"[{segment.scene_description}] {text}"
+                # if segment.scene_description: # COMMENTED OUT: Do not add scene description here
+                #     text = f"[{segment.scene_description}] {text}"
 
                 # SRT形式で書き込み
                 f.write(f"{i}\n")
