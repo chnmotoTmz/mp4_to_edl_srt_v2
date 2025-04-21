@@ -1,0 +1,5 @@
+# Environment variables
+.env
+
+# Temporary/Utility scripts
+# mp4_to_edl_srt/regenerate_outputs.py # Keep regeneration script for now, might be useful
