@@ -21,8 +21,11 @@ if %ERRORLEVEL% neq 0 (
     echo GUIが正常に動作しない可能性があります。
 )
 
+REM PYTHONPATHを設定
+set PYTHONPATH=%~dp0
+
 echo GUIアプリケーションを起動しています...
-py -3.11 mp4_to_edl_srt/gui.py
+python mp4_to_edl_srt/gui.py
 if errorlevel 1 (
     echo エラーが発生しました。詳細はログを確認してください。
     pause

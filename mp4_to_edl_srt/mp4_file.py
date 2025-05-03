@@ -820,6 +820,7 @@ class MP4File:
                 "duration_seconds": self.duration,
                 "creation_time_utc": self.creation_time,
                 "timecode_offset": self.timecode_offset,
+                "file_out_timecode_597": self.get_file_out_timecode_597(),  # 59.7fps OUTタイムコードを追加
             },
             # Ensure transcription_result format is consistent even on errors
             "transcription_whisper_result": {
@@ -832,4 +833,35 @@ class MP4File:
         }
         logger.info("中間データ辞書作成完了。") # Changed to logger
         return data
+
+    def get_file_out_timecode_597(self) -> Optional[str]:
+        """
+        MP4ファイルのOUTタイムコード（終了位置）を59.7fps換算で返す
+        """
+        if self.duration is None or not self.timecode_offset:
+            return None
+        # 59.7fps用のTimecodeConverterを一時生成
+        tc_597 = TimecodeConverter(frame_rate=60)  # 59.7fps ≒ 60fpsで近似
+        in_ms = tc_597.hhmmssff_to_ms(self.timecode_offset)
+        out_ms = in_ms + int(self.duration * 1000)
+        return tc_597.ms_to_hhmmssff(out_ms)
+
+if __name__ == "__main__":
+    # 単体テスト用main
+    import sys
+    print("MP4File 59.7fps OUTタイムコードテスト")
+    if len(sys.argv) < 2:
+        print("使い方: python mp4_file.py <mp4ファイルパス> [タイムコードオフセット] [duration秒]")
+        sys.exit(1)
+    filepath = sys.argv[1]
+    # テスト用: タイムコードオフセットとdurationを手動指定も可
+    timecode_offset = sys.argv[2] if len(sys.argv) > 2 else "00:00:00:00"
+    duration = float(sys.argv[3]) if len(sys.argv) > 3 else 10.0
+    from mp4_to_edl_srt.timecode_utils import TimecodeConverter
+    converter = TimecodeConverter(frame_rate=60)
+    mp4 = MP4File(filepath, 1, converter)
+    mp4.timecode_offset = timecode_offset
+    mp4.duration = duration
+    out_tc = mp4.get_file_out_timecode_597()
+    print(f"IN: {mp4.timecode_offset}  DURATION: {mp4.duration}秒  → OUT(59.7fps): {out_tc}")
 

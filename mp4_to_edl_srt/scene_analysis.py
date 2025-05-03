@@ -126,7 +126,15 @@ class SceneAnalyzer:
                             if ret:
                                 image_filename = f"scene_{scene_id_counter:04d}.jpg"
                                 thumbnail_path = os.path.join(capture_output_dir, image_filename)
-                                cv2.imwrite(thumbnail_path, frame)
+                                
+                                # --- 画像をリサイズ (30%に縮小) ---
+                                scale_percent = 30  # パーセント
+                                width = int(frame.shape[1] * scale_percent / 100)
+                                height = int(frame.shape[0] * scale_percent / 100)
+                                dim = (width, height)
+                                resized_frame = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
+                                logger.debug(f"    Resized frame from {frame.shape[1]}x{frame.shape[0]} to {width}x{height}")
+                                cv2.imwrite(thumbnail_path, resized_frame)  # リサイズしたフレームを保存
                                 logger.info(f"    Thumbnail saved: {thumbnail_path}")
                                 
                                 if self.gemini_client and thumbnail_path:
@@ -223,7 +231,15 @@ class SceneAnalyzer:
                           if ret:
                                image_filename = f"scene_{scene_id_counter:04d}.jpg"
                                thumbnail_path = os.path.join(capture_output_dir, image_filename)
-                               cv2.imwrite(thumbnail_path, frame)
+                               
+                               # --- 画像をリサイズ (30%に縮小) ---
+                               scale_percent = 30  # パーセント
+                               width = int(frame.shape[1] * scale_percent / 100)
+                               height = int(frame.shape[0] * scale_percent / 100)
+                               dim = (width, height)
+                               resized_frame = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
+                               logger.debug(f"    Resized frame from {frame.shape[1]}x{frame.shape[0]} to {width}x{height}")
+                               cv2.imwrite(thumbnail_path, resized_frame)  # リサイズしたフレームを保存
                                logger.info(f"    Thumbnail saved: {thumbnail_path}")
                                
                                if self.gemini_client and thumbnail_path:
@@ -288,4 +304,4 @@ class SceneAnalyzer:
 
         self._report_progress(1.0)
         logger.info(f"Scene analysis finished. Detected {len(scenes)} scenes.")
-        return scenes 
+        return scenes

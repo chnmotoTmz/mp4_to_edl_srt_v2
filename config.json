@@ -25,8 +25,9 @@
         "use_timecode_offset": true
     },
     "paths": {
-        "last_input_folder": "G:/100GOPRO",
-        "last_output_folder": "G:/100GOPRO"
+        "last_input_folder": "\\\\pypy2\\photo\\gopro\\2024-08-05",
+        "last_output_folder": "\\\\pypy2\\photo\\gopro\\2024-08-05",
+        "temp_folder": "C:/temp/mp4_to_edl_temp"
     },
     "gui": {
         "theme": "default",
@@ -37,5 +38,13 @@
     "scene_analysis": {
         "enabled": true,
         "frame_analysis_rate": 30
+    },
+    "gemini": {
+        "api_key": "",
+        "model": "gemini-pro",
+        "temperature": 0.7,
+        "max_output_tokens": 2048,
+        "top_p": 0.8,
+        "top_k": 40
     }
 }

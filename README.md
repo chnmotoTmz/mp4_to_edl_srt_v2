@@ -1,288 +1,408 @@
 # MP4 to EDL/SRT Converter
 
-[English](#english) | [日本語](#japanese)
+このプロジェクトは、MP4動画ファイルから音声認識による字幕生成とシーン分析を行い、EDLファイルとSRT字幕ファイルを生成するツールです。
 
-<a id="english"></a>
-## English
+## 主な機能
 
-### Overview
-MP4 to EDL/SRT Converter is a tool that converts MP4 video files into EDL (Edit Decision List) and SRT subtitle files. It uses Whisper for speech recognition and supports both standard and high-speed modes.
+1. **音声認識による字幕生成**
+   - Whisperを使用した高精度な音声認識
+   - 日本語対応
+   - セグメントごとの文字起こしと評価
 
-### Features
-- Converts MP4 files to EDL and SRT formats
-- Supports batch processing of multiple MP4 files
-- Uses OpenAI's Whisper for accurate speech recognition
-- Supports faster-whisper for high-speed processing
-- Preserves original timecodes from MP4 files
-- User-friendly GUI interface
-- Settings configurable directly in the GUI
-- **Bilingual interface (English/Japanese)**
+2. **シーン分析**
+   - 動画のシーン分割
+   - Gemini APIによるシーン説明文の生成
+   - シーン評価タグの付与
+   - サムネイル画像の生成
 
-### Requirements
-- Python 3.8 or later
-- FFmpeg installed and accessible from PATH
-- Required Python packages:
-  ```
-  whisper>=1.0.0
-  torch>=2.0.0
-  pydub>=0.25.1
-  faster-whisper>=0.9.0 (optional, for high-speed mode)
-  ```
+3. **出力フォーマット**
+   - SRT字幕ファイルの生成
+   - EDLファイル（CMX 3600形式）の生成
+   - 詳細なJSON形式の出力データ
 
-### Installation
-1. Clone or download this repository
-2. Install the required packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. (Optional) Install faster-whisper for high-speed mode:
-   ```bash
-   pip install faster-whisper
-   ```
+## システム要件
 
-### Usage
-#### GUI Mode
-1. Run the GUI application:
-   - Windows: Double-click `run_gui.bat`
-   - Mac/Linux: Execute `run_gui.sh`
-2. Select input folder containing MP4 files
-3. Choose output folder for EDL/SRT files
-4. Configure optional settings in the GUI
-5. **Select your preferred language (English/Japanese) from the interface**
-6. Click "Start Conversion"
+- Python 3.x
+- FFmpeg
+- CUDA対応GPU（推奨）
 
-#### Command Line Mode
+## 依存パッケージ
+
+```
+ffmpeg-python
+faster-whisper>=0.9.0
+pyyaml
+whisper>=1.0.0
+torch>=2.0.0
+pydub>=0.25.1
+opencv-python
+```
+
+## インストール方法
+
+1. リポジトリをクローン：
 ```bash
-python main.py --input /path/to/input/folder --output /path/to/output/folder
+git clone [リポジトリURL]
 ```
 
-Options:
-- `--input`: Input folder containing MP4 files (required)
-- `--output`: Output folder for EDL and SRT files (required)
-- `--use-timecode`: Use MP4 file's internal timecode (default: True)
-- `--no-timecode`: Ignore MP4 file's internal timecode
-
-### Output Files
-- `output.edl`: Edit Decision List in CMX 3600 format
-- `output.srt`: Subtitle file with synchronized timecodes
-
-## Development Status (Beta Version)
-
-This project is currently in beta. Basic features are implemented, but there are several known issues.
-
-### Implemented Features
-
-- Audio extraction from MP4 files using FFmpeg
-- Text transcription using Whisper AI
-- EDL/SRT file generation
-- Basic GUI interface with customizable settings
-- **Bilingual interface (English/Japanese)**
-
-### Known Issues
-
-#### Audio Extraction Issues
-- Some MP4 files may fail to detect audio streams
-- Transcription accuracy varies significantly depending on audio quality
-
-#### EDL/SRT Generation Challenges
-- Timecode synchronization issues in some cases
-- Increased memory usage when processing long videos
-
-#### GUI Related
-- Unstable progress bar updates
-- No cancel functionality during processing
-
-### Feedback Request
-
-This tool is under development and has room for improvement. We appreciate feedback on:
-- Bugs or operational issues
-- Needed features or options
-- Usage observations
-
-### Handling Offline Clips in DaVinci Resolve
-
-If you encounter offline media errors when importing EDL files into DaVinci Resolve, you can configure Resolve to continue rendering by:
-
-1. Go to Preferences → User → User Interface Settings
-2. Uncheck "Stop rendering when a frame or clip cannot be processed"
-3. Click "Save"
-
-This setting allows Resolve to skip offline clips during rendering rather than stopping the entire process.
-
-## Settings Saving Feature
-
-The application automatically saves the following settings and restores them on the next startup:
-
-- Selected language (Japanese/English)
-- Last used input folder path
-- Last used output folder path
-
-These settings are saved in a `settings.json` file. This file is typically created in the same directory as the application.
-
-### Example of settings.json
-
-```json
-{
-    "language": "en",
-    "last_input_folder": "C:/Users/username/Videos",
-    "last_output_folder": "C:/Users/username/Projects/edl_files"
-}
-```
-
-For Japanese selection:
-
-```json
-{
-    "language": "ja",
-    "last_input_folder": "C:/Users/username/Documents/mp4_files",
-    "last_output_folder": "C:/Users/username/Documents/edl_output"
-}
-```
-
-You don't need to manually edit the settings file. Settings are automatically saved while using the application.
-
-<a id="japanese"></a>
-## 日本語
-
-### 概要
-MP4 to EDL/SRT Converterは、MP4動画ファイルをEDL（編集決定リスト）とSRT字幕ファイルに変換するツールです。音声認識にWhisperを使用し、標準モードと高速モードの両方をサポートしています。
-
-### 特徴
-- MP4ファイルをEDLとSRT形式に変換
-- 複数のMP4ファイルの一括処理に対応
-- OpenAIのWhisperを使用した高精度な音声認識
-- faster-whisperによる高速処理モードをサポート
-- MP4ファイルの内部タイムコードを保持
-- 使いやすいGUIインターフェース
-- GUI上で直接設定可能
-- **バイリンガルインターフェース（日本語/英語）**
-
-### 必要条件
-- Python 3.8以降
-- FFmpeg（PATHから実行可能な状態）
-- 必要なPythonパッケージ：
-  ```
-  whisper>=1.0.0
-  torch>=2.0.0
-  pydub>=0.25.1
-  faster-whisper>=0.9.0（オプション、高速モード用）
-  ```
-
-### インストール方法
-1. このリポジトリをクローンまたはダウンロード
-2. 必要なパッケージをインストール：
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. （オプション）高速モード用にfaster-whisperをインストール：
-   ```bash
-   pip install faster-whisper
-   ```
-
-### 使用方法
-#### GUIモード
-1. GUIアプリケーションを起動：
-   - Windows: `run_gui.bat`をダブルクリック
-   - Mac/Linux: `run_gui.sh`を実行
-2. MP4ファイルが入った入力フォルダを選択
-3. EDL/SRTファイルの出力先フォルダを選択
-4. GUI上でオプション設定を行う
-5. **インターフェースから希望の言語（日本語/英語）を選択**
-6. 「変換開始」をクリック
-
-#### コマンドラインモード
+2. 依存パッケージをインストール：
 ```bash
-python main.py --input /path/to/input/folder --output /path/to/output/folder
+pip install -r requirements.txt
 ```
 
-オプション：
-- `--input`: MP4ファイルが入ったフォルダ（必須）
-- `--output`: EDLとSRTファイルの出力先フォルダ（必須）
-- `--use-timecode`: MP4ファイルの内部タイムコードを使用（デフォルト：True）
-- `--no-timecode`: 内部タイムコードを無視
+## 使用方法
 
-### 出力ファイル
-- `output.edl`: CMX 3600形式の編集決定リスト
-- `output.srt`: タイムコード同期済みの字幕ファイル
+### 基本的な使用方法
 
-## 開発状況（ベータ版）
+```bash
+python main.py [動画ファイルのパス]
+```
 
-本プロジェクトは現在ベータ版として開発中です。基本機能は実装されていますが、いくつかの既知の問題があります。
+### オプション
 
-### 実装済みの基本機能
+- `--output_dir`: 出力ディレクトリの指定
+- `--model_size`: Whisperモデルのサイズ指定（tiny, base, small, medium, large）
+- `--device`: 処理デバイスの指定（cpu, cuda）
+- `--language`: 音声認識の言語指定（デフォルト: ja）
 
-- FFmpegを使用したMP4からの音声抽出
-- Whisper AIによる基本的な文字起こし
-- EDL/SRTファイルの生成
-- カスタマイズ可能な設定を備えた基本的なGUIインターフェース
-- **バイリンガルインターフェース（日本語/英語）**
+## GUIの実行
 
-### 既知の問題点
+- Windows: `run_gui.bat`を実行
+- Linux/Mac: `run_gui.sh`を実行
 
-#### Audio Extraction Issues
-- Some MP4 files may fail to detect audio streams
-- Transcription accuracy varies significantly depending on audio quality
+## ファイル構造
 
-#### EDL/SRT Generation Challenges
-- Timecode synchronization issues in some cases
-- Increased memory usage when processing long videos
+```
+.
+├── main.py                 # メインスクリプト
+├── scene_analysis.py       # シーン分析モジュール
+├── transcription.py        # 音声認識モジュール
+├── requirements.txt        # 依存パッケージリスト
+├── run_gui.bat            # Windows用GUIランチャー
+├── run_gui.sh             # Linux/Mac用GUIランチャー
+└── config.json            # 設定ファイル
+```
 
-#### GUI Related
-- Unstable progress bar updates
-- No cancel functionality during processing
+## 注意事項
 
-### Feedback Request
+1. **GPS機能について**
+   - GPSデータの抽出機能は現在未実装です
+   - 将来的な実装予定です
 
-This tool is under development and has room for improvement. We appreciate feedback on:
-- Bugs or operational issues
-- Needed features or options
-- Usage observations
+2. **処理時間について**
+   - 音声認識とシーン分析には時間がかかります
+   - GPUを使用することで処理時間を短縮できます
 
-### Handling Offline Clips in DaVinci Resolve
+3. **リソース要件**
+   - 大きな動画ファイルの処理には十分なメモリが必要です
+   - GPUを使用する場合はCUDA対応のGPUが必要です
 
-If you encounter offline media errors when importing EDL files into DaVinci Resolve, you can configure Resolve to continue rendering by:
+## エラー対処
 
-1. Go to Preferences → User → User Interface Settings
-2. Uncheck "Stop rendering when a frame or clip cannot be processed"
-3. Click "Save"
+1. 音声認識に失敗する場合：
+   - 必要なパッケージが正しくインストールされているか確認
+   - 音声トラックが正しく含まれているか確認
+   - GPUメモリが不足していないか確認
 
-This setting allows Resolve to skip offline clips during rendering rather than stopping the entire process.
+2. シーン分析に失敗する場合：
+   - 動画ファイルが正しい形式か確認
+   - 十分なディスク容量があるか確認
 
-### 注意事項
-- 処理時間は動画の長さやPCのスペックによって変動します
-- 高速モードを使用する場合は、別途faster-whisperのインストールが必要です
-- 大量のファイルを処理する場合は、十分なディスク容量を確保してください
+## 出力データ仕様
 
-## 設定保存機能について
+### 1. GPSデータ（JSON形式）
 
-アプリケーションは以下の設定を自動的に保存し、次回起動時に復元します：
+```json
+[
+  {
+    "timestamp": "2024-01-01T12:00:00",
+    "latitude": 35.6895,
+    "longitude": 139.6917,
+    "altitude": 10.5,
+    "speed": 5.2,
+    "track": 90.0
+  }
+]
+```
 
-- 選択された言語（日本語/英語）
-- 最後に使用した入力フォルダのパス
-- 最後に使用した出力フォルダのパス
+各フィールドの説明：
+- `timestamp`: GPSデータの取得時刻（ISO 8601形式）
+- `latitude`: 緯度（度単位）
+- `longitude`: 経度（度単位）
+- `altitude`: 高度（メートル単位）
+- `speed`: 速度（メートル/秒）
+- `track`: 進行方向（度単位、0-360）
 
-これらの設定は `settings.json` ファイルに保存されます。このファイルは通常、アプリケーションと同じディレクトリに作成されます。
+### 2. SRT字幕ファイル
 
-### settings.jsonの例
+```
+1
+00:00:00,000 --> 00:00:05,000
+字幕テキスト1
+
+2
+00:00:05,000 --> 00:00:10,000
+字幕テキスト2
+```
+
+フォーマット仕様：
+- 字幕番号（連番）
+- タイムコード（開始時間 --> 終了時間）
+  - 形式：HH:MM:SS,mmm
+  - ミリ秒は3桁で表示
+- 字幕テキスト（1行または複数行）
+- 空行で区切り
+
+### 3. EDLファイル（CMX 3600形式）
+
+```
+TITLE: プロジェクト名
+FCM: NON-DROP FRAME
+
+001  AX       V     C        00:00:00:00 00:00:05:00 00:00:00:00 00:00:05:00
+* FROM CLIP NAME: クリップ名
+* COMMENT: コメント
+```
+
+各フィールドの説明：
+- `TITLE`: プロジェクト名
+- `FCM`: フレームカウントモード
+- イベント行の構成：
+  - イベント番号（3桁）
+  - リールID（2文字）
+  - トラックタイプ（V=ビデオ、A=オーディオ）
+  - トランジションタイプ
+  - ソースタイムコード（開始/終了）
+  - レコードタイムコード（開始/終了）
+- メタデータ行：
+  - クリップ名
+  - コメント
+
+### 4. テキスト形式GPSデータ
+
+```
+総データ数: 100
+
+ポイント 1:
+  緯度: 35.6895
+  経度: 139.6917
+  高度: 10.5m
+  速度: 5.2m/s
+  時刻: 2024-01-01T12:00:00
+
+ポイント 2:
+  ...
+```
+
+フォーマット仕様：
+- 総データ数の表示
+- 各ポイントの詳細情報
+  - 緯度・経度（度単位）
+  - 高度（メートル単位）
+  - 速度（メートル/秒）
+  - 時刻（ISO 8601形式）
+
+### 5. 設定ファイル（config.json）
 
 ```json
 {
+  "gps": {
+    "output_format": "json",
+    "include_metadata": true
+  },
+  "subtitle": {
     "language": "ja",
-    "last_input_folder": "C:/Users/username/Documents/mp4_files",
-    "last_output_folder": "C:/Users/username/Documents/edl_output"
+    "model_size": "medium",
+    "use_gpu": true
+  },
+  "edl": {
+    "frame_rate": 29.97,
+    "timecode_format": "non-drop"
+  }
 }
 ```
 
-英語を選択した場合：
+設定項目：
+- GPS設定
+  - 出力フォーマット
+  - メタデータの包含
+- 字幕設定
+  - 言語
+  - モデルサイズ
+  - GPU使用
+- EDL設定
+  - フレームレート
+  - タイムコード形式
+
+### 6. シーン分析データ（JSON形式）
 
 ```json
 {
-    "language": "en",
-    "last_input_folder": "C:/Users/username/Videos",
-    "last_output_folder": "C:/Users/username/Projects/edl_files"
+  "scenes": [
+    {
+      "scene_id": 1,
+      "start_ms": 0,
+      "end_ms": 5000,
+      "description": "シーンの説明文",
+      "thumbnail_path": "path/to/thumbnail.jpg",
+      "scene_good_reason": "Scenic",
+      "scene_bad_reason": null,
+      "scene_evaluation_tag": "Scenic"
+    }
+  ]
 }
 ```
 
-手動で設定ファイルを編集する必要はありません。アプリケーションの使用中に設定が自動的に保存されます。
-# mp4_to_edl_srt_v2
-# mp4_to_edl_srt_v2
+各フィールドの説明：
+- `scene_id`: シーンの連番ID
+- `start_ms`: シーン開始時間（ミリ秒）
+- `end_ms`: シーン終了時間（ミリ秒）
+- `description`: Gemini APIによるシーン説明文
+- `thumbnail_path`: シーンサムネイル画像のパス
+- `scene_good_reason`: シーン評価（良い理由）
+  - 有効な値: "Scenic", "Landmark", "Informative", "Action"
+- `scene_bad_reason`: シーン評価（悪い理由）
+  - 有効な値: "Privacy", "PoorQuality", "Irrelevant"
+- `scene_evaluation_tag`: Gemini APIからの生の評価タグ
+
+### 7. シーン評価タグ仕様
+
+#### 良い評価タグ
+- `Scenic`: 風景が美しいシーン
+- `Landmark`: 有名な場所や建物が映っているシーン
+- `Informative`: 情報量が多いシーン
+- `Action`: アクションや動きのあるシーン
+
+#### 悪い評価タグ
+- `Privacy`: プライバシーに関わる可能性のあるシーン
+- `PoorQuality`: 画質が悪いシーン
+- `Irrelevant`: コンテンツと関係のないシーン
+
+#### その他
+- `Generic`: 特に特徴のない一般的なシーン
+- `null`: 評価が行われていないシーン
+
+### 8. シーン分析の設定パラメータ
+
+```json
+{
+  "scene_analysis": {
+    "frame_analysis_rate": 30,
+    "capture_output_dir": "path/to/thumbnails",
+    "model_path": "path/to/model",
+    "device": "cpu"
+  }
+}
+```
+
+設定項目：
+- `frame_analysis_rate`: 分析するフレームの間隔（Nフレームごと）
+- `capture_output_dir`: サムネイル画像の保存先ディレクトリ
+- `model_path`: シーン分析モデルのパス
+- `device`: 処理デバイス（"cpu"または"cuda"）
+
+### 9. 最終出力データ（JSON形式）
+
+```json
+{
+    "source_filepath": "動画ファイルのパス",
+    "file_index": 1,
+    "extracted_audio_filepath": "抽出された音声ファイルのパス",
+    "metadata": {
+        "duration_seconds": 221.221,
+        "creation_time_utc": "2016-01-05T21:14:57.000000Z",
+        "timecode_offset": "01:21:49:54"
+    },
+    "transcription_whisper_result": {
+        "text": "全文の文字起こしテキスト",
+        "segments": [
+            {
+                "start": 3.88,
+                "end": 4.66,
+                "text": "セグメントの文字起こし"
+            }
+        ],
+        "language": "ja"
+    },
+    "detected_scenes": [
+        {
+            "scene_id": 1,
+            "start_timecode": "00:00:00:00",
+            "end_timecode": "00:00:22:01",
+            "description": "シーンの説明文",
+            "thumbnail_path": "サムネイル画像のパス",
+            "scene_good_reason": null,
+            "scene_bad_reason": null,
+            "scene_evaluation_tag": "Generic"
+        }
+    ],
+    "final_segments": [
+        {
+            "start_timecode": "00:00:03:52",
+            "end_timecode": "00:00:04:39",
+            "transcription": "文字起こしテキスト",
+            "scene_id": 1,
+            "scene_description": "シーンの説明文",
+            "transcription_good_reason": "Descriptive",
+            "transcription_bad_reason": null,
+            "source_timecode_offset": "01:21:49:54",
+            "source_filename": "GH012562.MP4",
+            "file_index": 1
+        }
+    ]
+}
+```
+
+各フィールドの説明：
+
+#### 基本情報
+- `source_filepath`: 処理対象の動画ファイルパス
+- `file_index`: ファイルのインデックス番号
+- `extracted_audio_filepath`: 抽出された音声ファイルのパス
+
+#### メタデータ
+- `metadata.duration_seconds`: 動画の長さ（秒）
+- `metadata.creation_time_utc`: 動画の作成時刻（UTC）
+- `metadata.timecode_offset`: タイムコードのオフセット
+
+#### 文字起こし結果
+- `transcription_whisper_result.text`: 全文の文字起こし
+- `transcription_whisper_result.segments`: セグメントごとの文字起こし
+  - `start`: 開始時間（秒）
+  - `end`: 終了時間（秒）
+  - `text`: セグメントの文字起こし
+- `transcription_whisper_result.language`: 検出された言語
+
+#### シーン情報
+- `detected_scenes`: 検出されたシーンのリスト
+  - `scene_id`: シーンID
+  - `start_timecode`: シーン開始タイムコード
+  - `end_timecode`: シーン終了タイムコード
+  - `description`: シーンの説明文
+  - `thumbnail_path`: サムネイル画像のパス
+  - `scene_good_reason`: 良い評価理由
+  - `scene_bad_reason`: 悪い評価理由
+  - `scene_evaluation_tag`: 評価タグ
+
+#### 最終セグメント
+- `final_segments`: 最終的なセグメントリスト
+  - `start_timecode`: 開始タイムコード
+  - `end_timecode`: 終了タイムコード
+  - `transcription`: 文字起こしテキスト
+  - `scene_id`: 対応するシーンID
+  - `scene_description`: シーンの説明文
+  - `transcription_good_reason`: 文字起こしの良い評価理由
+    - 有効な値: "Descriptive", "Emotional"
+  - `transcription_bad_reason`: 文字起こしの悪い評価理由
+    - 有効な値: "Filler", "Repetitive"
+  - `source_timecode_offset`: ソースのタイムコードオフセット
+  - `source_filename`: ソースファイル名
+  - `file_index`: ファイルインデックス
+
+## ライセンス
+
+このプロジェクトはオープンソースソフトウェアとして提供されています。
+
+## 貢献
+
+バグ報告や機能改善の提案は、Issueトラッカーを通じてお願いします。
