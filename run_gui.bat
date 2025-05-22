@@ -1,34 +1,40 @@
 @echo off
 chcp 65001 > nul
 cd /d %~dp0
-echo MP4 to EDL/SRT Converter を起動しています...
+echo Launching MP4 to EDL/SRT Converter (Electron App)...
 echo.
 
-REM Pythonが利用可能か確認
-python --version >nul 2>&1
+REM Check if Node.js and npm are available
+node --version >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo エラー: Pythonが見つかりません。
-    echo Pythonをインストールしてから再試行してください。
-    echo https://www.python.org/downloads/
+    echo ERROR: Node.js is not found.
+    echo Please install Node.js (which includes npm) and try again.
+    echo https://nodejs.org/
     pause
     exit /b 1
 )
 
-REM 必要なパッケージがインストールされているか確認
-python -c "import tkinter" >nul 2>&1
+npm --version >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo 警告: tkinterがインストールされていません。
-    echo GUIが正常に動作しない可能性があります。
-)
-
-REM PYTHONPATHを設定
-set PYTHONPATH=%~dp0
-
-echo GUIアプリケーションを起動しています...
-python mp4_to_edl_srt/gui.py
-if errorlevel 1 (
-    echo エラーが発生しました。詳細はログを確認してください。
+    echo ERROR: npm is not found.
+    echo Please install Node.js (which includes npm) and try again.
+    echo https://nodejs.org/
     pause
+    exit /b 1
 )
 
-pause 
+echo Starting the Electron application...
+REM This assumes package.json has a "start": "electron ." script.
+npm start
+
+if %ERRORLEVEL% neq 0 (
+    echo An error occurred while trying to start the Electron application.
+    echo Please check the console for more details.
+    pause
+    exit /b 1
+)
+
+echo.
+echo The Electron application has been started.
+echo If the app window does not appear, please check for error messages above.
+pause

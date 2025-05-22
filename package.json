@@ -1,0 +1,22 @@
+{
+  "name": "mp4-to-edl-srt-electron",
+  "version": "1.0.0",
+  "description": "Electron app for MP4 to EDL/SRT conversion",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "electron",
+    "python",
+    "ffmpeg",
+    "whisper"
+  ],
+  "author": "Your Name",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  },
+  "dependencies": {}
+}

@@ -3,3 +3,30 @@
 
 # Temporary/Utility scripts
 # mp4_to_edl_srt/regenerate_outputs.py # Keep regeneration script for now, might be useful
+
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log*
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.pytest_cache/
+instance/
+build/
+dist/
+*.egg-info/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal

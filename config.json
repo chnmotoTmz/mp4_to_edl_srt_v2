@@ -1,11 +1,11 @@
 {
     "whisper": {
-        "model": "large-v3",
+        "model": "small",
         "language": "auto",
-        "initial_prompt": "日本語での自然な会話。",
+        "initial_prompt": "Updated Prompt via Script",
         "temperature": 0.0,
         "beam_size": 5,
-        "condition_on_previous": false
+        "condition_on_previous": true
     },
     "audio": {
         "sample_rate": 44100,
@@ -25,26 +25,26 @@
         "use_timecode_offset": true
     },
     "paths": {
-        "last_input_folder": "\\\\pypy2\\photo\\gopro\\2024-08-05",
-        "last_output_folder": "\\\\pypy2\\photo\\gopro\\2024-08-05",
-        "temp_folder": "C:/temp/mp4_to_edl_temp"
+        "last_input_folder": "/app/test_mp4_input",
+        "last_output_folder": "/app/test_electron_output"
     },
     "gui": {
         "theme": "default",
         "font_size": 10,
         "window_width": 800,
-        "window_height": 900
+        "window_height": 900,
+        "ui_language": "en"
     },
     "scene_analysis": {
         "enabled": true,
-        "frame_analysis_rate": 30
+        "frame_analysis_rate": 5
     },
-    "gemini": {
-        "api_key": "",
-        "model": "gemini-pro",
-        "temperature": 0.7,
-        "max_output_tokens": 2048,
-        "top_p": 0.8,
-        "top_k": 40
-    }
+    "input_folder": "/app/test_mp4_input",
+    "output_folder": "/app/test_electron_output",
+    "initial_prompt": "Test Prompt from manual edit",
+    "use_timecode_offset": true,
+    "scene_analysis_enabled": true,
+    "scene_analysis_rate": 5,
+    "ui_language": "en",
+    "existing_config_value": "This should be preserved if save/load is partial"
 }
