@@ -7,3 +7,6 @@ pydub>=0.25.1
 pydub
 opencv-python
 whisper>=1.0.0
+Flask
+python-dotenv
+Pillow

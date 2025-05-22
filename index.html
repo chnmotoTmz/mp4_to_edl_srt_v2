@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="appTitle">MP4 to EDL/SRT Converter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 id="appTitleHeading">MP4 to EDL/SRT Converter</h1>
+            <div class="lang-selector">
+                <label for="languageSelect" id="languageSelectLabel">Language:</label>
+                <select id="languageSelect">
+                    <option value="en">English</option>
+                    <option value="ja">日本語</option>
+                </select>
+            </div>
+        </header>
+
+        <main>
+            <section class="form-section">
+                <div class="form-group">
+                    <label for="inputFolder" id="inputFolderLabel">Input Folder:</label>
+                    <div class="input-group">
+                        <input type="text" id="inputFolder" readonly>
+                        <button id="browseInputFolder" class="browse-button">Browse</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="outputFolder" id="outputFolderLabel">Output Folder:</label>
+                    <div class="input-group">
+                        <input type="text" id="outputFolder" readonly>
+                        <button id="browseOutputFolder" class="browse-button">Browse</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="initialPrompt" id="initialPromptLabel">Initial Prompt (Optional):</label>
+                    <input type="text" id="initialPrompt">
+                </div>
+            </section>
+
+            <section class="advanced-options-section">
+                <details>
+                    <summary id="advancedOptionsLabel">Advanced Options</summary>
+                    <div class="options-content">
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="useTimecodeOffset">
+                            <label for="useTimecodeOffset" id="useTimecodeOffsetLabel">Use internal timecode from MP4 files</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="enableSceneAnalysis">
+                            <label for="enableSceneAnalysis" id="enableSceneAnalysisLabel">Enable Scene Analysis</label>
+                        </div>
+                        <div class="form-group">
+                            <label for="sceneAnalysisRate" id="sceneAnalysisRateLabel">Scene Analysis Frame Rate (fps):</label>
+                            <input type="number" id="sceneAnalysisRate" min="1" value="10" disabled>
+                        </div>
+                    </div>
+                </details>
+            </section>
+
+            <section class="controls-section">
+                <button id="startConversionBtn" class="action-button">Start Conversion</button>
+                <button id="cancelBtn" class="action-button cancel-button">Cancel</button>
+            </section>
+
+            <section class="log-section">
+                <h3 id="logAreaLabel">Log / Progress</h3>
+                <div id="logArea" class="log-display" aria-live="polite"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p id="footerText">App Footer</p>
+        </footer>
+    </div>
+    <script src="renderer.js"></script>
+</body>
+</html>
